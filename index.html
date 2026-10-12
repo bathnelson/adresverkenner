@@ -1039,6 +1039,10 @@
     let currentDakData = null;
     let currentWarmteprogramma = null;
     let currentFundering = null;
+    // Eindmelding als warmteprogramma/fundering niet op te halen was - zodat een volgende
+    // renderWoningData() niet weer een eeuwige spinner tekent.
+    let currentWarmteStatus = null;
+    let currentFunderingStatus = null;
     let currentDakDelen = null;
     let currentBuildingFaces = null;
     let currentDak2D = null;
@@ -1186,6 +1190,8 @@
       currentDak2D = null;
       currentWarmteprogramma = null;
       currentFundering = null;
+      currentWarmteStatus = null;
+      currentFunderingStatus = null;
       currentEnergielabel = null;
       currentEnergielabelInfo = null;
       currentEnergielabelClip = '';
@@ -2683,6 +2689,7 @@
     }
 
     function clearWarmteSpinner(msg) {
+      currentWarmteStatus = msg;
       const el = document.getElementById('woning-warmteprogramma');
       if (el) el.innerHTML = `<span style="color:#999;font-size:0.85rem;">${msg}</span>`;
     }
@@ -2747,6 +2754,7 @@
     }
 
     function clearFunderingSpinner(msg) {
+      currentFunderingStatus = msg;
       const el = document.getElementById('woning-fundering');
       if (el) el.innerHTML = `<span style="color:#999;font-size:0.85rem;">${msg}</span>`;
     }
@@ -3158,12 +3166,14 @@
       // Haarlem-specifieke gegevens (open data GeoServer) - eigen ids voor de bestaande
       // updateWoningWarmteprogramma()/updateWoningErfgoed()/updateWoningFundering()-updaters.
       if (SHOW_HAARLEM_INFO && adres.gemeentenaam === 'Haarlem') {
-        const warmteContent = currentWarmteprogramma ? warmteprogrammaHtml(currentWarmteprogramma) : spinner;
+        const warmteContent = currentWarmteprogramma ? warmteprogrammaHtml(currentWarmteprogramma)
+          : currentWarmteStatus ? `<span style="color:#999;font-size:0.85rem;">${currentWarmteStatus}</span>` : spinner;
         bouwRows += kenmerkenRij('Warmteprogramma', `<span id="woning-warmteprogramma">${warmteContent}</span>`);
         const parts = currentWarmteprogramma ? erfgoedParts(currentWarmteprogramma) : [];
-        const erfgoedVerborgen = currentWarmteprogramma && !parts.length;
+        const erfgoedVerborgen = (currentWarmteprogramma && !parts.length) || currentWarmteStatus;
         bouwRows += `<tr id="woning-erfgoed-row"${erfgoedVerborgen ? ' style="display:none"' : ''}><td>Erfgoedstatus</td><td id="woning-erfgoed">${parts.join(' · ')}</td></tr>`;
-        const funderingContent = currentFundering ? funderingHtml(currentFundering) : spinner;
+        const funderingContent = currentFundering ? funderingHtml(currentFundering)
+          : currentFunderingStatus ? `<span style="color:#999;font-size:0.85rem;">${currentFunderingStatus}</span>` : spinner;
         bouwRows += kenmerkenRij('Fundering', `<span id="woning-fundering">${funderingContent}</span>`);
       }
       html += kenmerkenGroepHtml('Bouw', bouwRows);
