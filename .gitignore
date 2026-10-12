@@ -1,0 +1,9 @@
+# Whitelist: alleen wat naar GitHub Pages hoort. Alles andere (server-bestanden in host/,
+# helpers/, backups, docs, clusterdata) blijft lokaal.
+*
+!.gitignore
+!README.md
+!index.html
+!favicon.ico
+!favicon.svg
+!apple-touch-icon.png

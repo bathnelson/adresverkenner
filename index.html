@@ -1,0 +1,3758 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Adresverkenner</title>
+  <link rel="icon" href="favicon.ico" sizes="48x48">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="theme-color" content="#2b7d6a">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* --- Kleursysteem: betekenisvolle statuskleuren, overal met dezelfde logica gebruikt.
+       Groen = gunstig/veilig, oranje = let op, rood = ongunstig/risico, grijs = neutraal/
+       informatief (niet-beoordelend). Wordt eerst toegepast op het Klimaateffectatlas-tabblad,
+       later op de rest van de tool (energielabel, funderingsrisico, etc.). --- */
+    :root {
+      --status-good-bg: #e8f5ea;
+      --status-good-fg: #1e7d3c;
+      --status-good-border: #a9d9b6;
+      --status-good-solid: #2e9e52;
+
+      --status-warn-bg: #fef3e2;
+      --status-warn-fg: #a85c00;
+      --status-warn-border: #f3d19b;
+      --status-warn-solid: #f0900f;
+
+      --status-bad-bg: #fdeceb;
+      --status-bad-fg: #c22a1e;
+      --status-bad-border: #f2b8b0;
+      --status-bad-solid: #e6402f;
+
+      --status-neutral-bg: #f5f8f9;
+      --status-neutral-fg: #263640;
+      --status-neutral-border: #e0e0e0;
+      --status-neutral-solid: #8a97a0;
+    }
+
+    /* --- Tekstschaal: één stijl per rol, consequent hergebruikt i.p.v. ad-hoc groottes per
+       sectie. -lg is voor het ene kern-inzicht dat een scherm moet domineren. --- */
+    .stat-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #6f7071;
+    }
+
+    .stat-value-lg { font-size: 1.85rem; font-weight: 700; line-height: 1.15; color: #263640; }
+    .stat-value-md { font-size: 1.1rem; font-weight: 700; line-height: 1.25; color: #263640; }
+    .stat-caption { font-size: 0.78rem; color: #6f7071; line-height: 1.45; }
+
+    body {
+      font-family: 'Sofia Pro', Arial, Helvetica, sans-serif;
+      background: #fff;
+      color: #2e2e33;
+      min-height: 100vh;
+    }
+
+    a { color: #2e2e33; }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 0 2rem 2rem;
+    }
+
+    /* --- Sticky header: titel + zoekbalk blijven zichtbaar tijdens scrollen --- */
+    .sticky-header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: #fff;
+      padding-top: 0.75rem;
+      padding-bottom: 0.6rem;
+    }
+
+    .page-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #263640;
+      margin: 0 0 0.5rem;
+      line-height: 1.2;
+    }
+
+    .search-box {
+      position: relative;
+      background: #f5f8f9;
+      border-radius: 4px;
+      padding: 0.6rem 0.75rem;
+      border: 1px solid #e0e0e0;
+    }
+
+    .input-wrap {
+      position: relative;
+    }
+
+    .input-wrap input {
+      width: 100%;
+      padding: 0.75rem 2.2rem 0.75rem 1rem;
+      border: 2px solid #e8e8e8;
+      border-radius: 4px;
+      font-size: 1rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-wrap input:focus { border-color: #263640; }
+
+    .input-clear {
+      position: absolute;
+      right: 0.5rem;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #aaa;
+      font-size: 1.1rem;
+      line-height: 1;
+      padding: 0.25rem;
+      display: none;
+    }
+
+    .input-clear:hover { color: #2e2e33; }
+
+    .suggestions {
+      position: absolute;
+      left: 1.5rem;
+      right: 1.5rem;
+      top: calc(100% - 0.5rem);
+      background: #fff;
+      border-radius: 0 0 4px 4px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+      z-index: 10;
+      display: none;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .suggestions.active { display: block; }
+
+    .suggestion-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      padding: 0.6rem 1rem;
+      cursor: pointer;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .suggestion-item:last-child { border-bottom: none; }
+    .suggestion-item:hover, .suggestion-item.active { background: #f5f8f9; }
+    .suggestion-item b { color: #d12335; }
+
+    /* Straat+huisnummer blijft de hoofdregel; postcode+plaats staat er duidelijk herkenbaar
+       onder - anders zijn bijv. "Hermitage 1, Zaandam" en "Hermitage 1, Hoofddorp" in de
+       suggestielijst nauwelijks van elkaar te onderscheiden en is een verkeerde keuze snel
+       gemaakt. */
+    .suggestion-main { font-size: 0.9rem; color: #2e2e33; }
+
+    .suggestion-place {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #263640;
+    }
+
+    .suggestion-place svg { width: 0.85em; height: 0.85em; flex-shrink: 0; color: #8a97a0; }
+
+    .loading {
+      text-align: center;
+      padding: 2rem;
+      color: #6f7071;
+      display: none;
+    }
+
+    .loading.active { display: block; }
+
+    .spinner {
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      border: 3px solid #e8e8e8;
+      border-top-color: #d12335;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 0.5rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .results {
+      margin-top: 1.5rem;
+      display: none;
+    }
+
+    .results.active { display: block; }
+
+    /* --- Titelblok, kenmerken, WOZ: dossier-achtige opbouw (Funda-structuur), nu met een
+       gekleurd kader/achtergrond per sectie i.p.v. platte tekst op wit. --- */
+    .pagina-titel { font-size: 1.6rem; font-weight: 700; color: #1a2226; line-height: 1.2; }
+    .pagina-subtitel { font-size: 0.95rem; color: #6f7071; margin-top: 0.15rem; }
+
+    .kenmerken-regel {
+      font-size: 0.95rem;
+      color: #444;
+      margin-top: 0.85rem;
+      padding-top: 0.85rem;
+      border-top: 1px solid #dbe7e4;
+    }
+
+    .pagina-samenvatting {
+      font-size: 0.95rem;
+      color: #444;
+      line-height: 1.55;
+      margin-top: 0.6rem;
+    }
+
+    .woz-blok {
+      margin: 1.5rem 0;
+      background: #fff;
+      border: 1px solid #cdeadf;
+      border-radius: 8px;
+      padding: 1.1rem 1.25rem;
+    }
+    /* Zonder cijfer (nog niet geladen, storing of geen registratie): geen kader/vlak, zodat het
+       niet als uitgeschakeld invoerveld leest - alleen een onopvallende regel. */
+    .woz-blok--leeg {
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 1.1rem 0;
+    }
+    .woz-melding {
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      color: #8a8a8a;
+    }
+    .woz-melding strong { color: #6a6a6a; font-weight: 600; }
+    .woz-bedrag { font-size: 1.9rem; font-weight: 700; color: #1a2226; line-height: 1.15; }
+    .woz-peildatum { font-size: 0.8rem; color: #888; margin-top: 0.15rem; }
+    .woz-historie { font-size: 0.82rem; color: #888; margin-top: 0.4rem; }
+
+    .kenmerken-groep { margin-top: 1.75rem; }
+
+    .kenmerken-groep h3 {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #6f7071;
+      border-bottom: 1px solid #eceeef;
+      padding-bottom: 0.4rem;
+      margin-bottom: 0.5rem;
+    }
+
+    @media (max-width: 600px) {
+      .pagina-titel { font-size: 1.35rem; }
+      .woz-bedrag { font-size: 1.6rem; }
+    }
+
+    .data-grid {
+      columns: 2 220px;
+      column-gap: 1.5rem;
+    }
+
+    /* Vaste 2-koloms indeling voor twee losse, inhoudelijk gescheiden groepjes (i.t.t.
+       .data-grid, dat items zelf over kolommen verdeelt/balanceert). */
+    .fixed-two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 1.5rem;
+    }
+
+    .fixed-two-col .col-heading {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #263640;
+      margin-bottom: 0.4rem;
+    }
+
+    @media (max-width: 600px) {
+      .data-grid { columns: 1; }
+      .fixed-two-col { grid-template-columns: 1fr; row-gap: 0.5rem; }
+
+      .container { margin: 0 auto; padding: 0 0.75rem 1.5rem; }
+
+      .search-box { padding: 0.5rem 0.6rem; }
+
+      .compact-table td:first-child { width: auto; white-space: normal; display: block; padding-right: 0; }
+      .compact-table td:last-child { display: block; padding-bottom: 0.4rem; }
+      .compact-table td { padding: 0.15rem 0; }
+
+      .info-link { display: block; margin-left: 0; margin-top: 0.2rem; }
+      .td-flex { flex-wrap: wrap; }
+
+      .risk-card { padding: 0.85rem; gap: 0.65rem; }
+      .stat-value-lg { font-size: 1.5rem; }
+
+      .modal { padding: 1rem; max-height: 90vh; }
+
+      .map-container { height: 220px; }
+
+    }
+
+    /* Kenmerk (links) / waarde (rechts) rij, gebruikt in adres-, gebouw- en CBS-data */
+    .data-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.75rem;
+      padding: 0.3rem 0;
+      border-bottom: 1px solid #f2f2f2;
+      break-inside: avoid;
+    }
+
+    .data-item:last-child { border-bottom: none; }
+
+    .data-item .label {
+      font-size: 0.8rem;
+      color: #6f7071;
+      white-space: nowrap;
+    }
+
+    .data-item .value {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: #263640;
+      text-align: right;
+    }
+
+    .map-container {
+      width: 100%;
+      height: 300px;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 0.5rem;
+      border: 1px solid #e8e8e8;
+    }
+
+    .map-container iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    .error {
+      background: #fce4ec;
+      color: #d12335;
+      padding: 1rem 1.5rem;
+      border-radius: 4px;
+      margin-top: 1.5rem;
+      display: none;
+    }
+
+    .error.active { display: block; }
+
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 3px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    /* Zelfde statuskleuren als de risk-cards - "in gebruik" is net zo goed gunstig als een laag
+       hittestress-risico, dus die delen bewust dezelfde groen/oranje/grijs-logica. */
+    .badge-green { background: var(--status-good-bg); color: var(--status-good-fg); }
+    .badge-blue { background: var(--status-neutral-bg); color: var(--status-neutral-fg); }
+    .badge-orange { background: var(--status-warn-bg); color: var(--status-warn-fg); }
+
+    .source-link {
+      margin-top: 1rem;
+      text-align: right;
+    }
+
+    .source-link a {
+      color: #2e2e33;
+      text-decoration: underline;
+      font-size: 0.85rem;
+    }
+
+
+    /* --- Risicokaart: standaardcomponent voor een statusgebonden inzicht (hittestress,
+       overstromingsrisico, en later andere risico-indicatoren elders in de tool). Witte kaart +
+       gekleurde accentrand i.p.v. een volledig gekleurde achtergrond, zodat de kleur het oog
+       trekt zonder de pagina druk te maken. --- */
+    .risk-card {
+      display: flex;
+      gap: 0.9rem;
+      padding: 1.1rem 1.1rem 1.1rem 1rem;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-left: 4px solid var(--status-neutral-solid);
+      border-radius: 8px;
+      margin-bottom: 0.85rem;
+    }
+
+    .risk-card--good { border-left-color: var(--status-good-solid); }
+    .risk-card--warn { border-left-color: var(--status-warn-solid); }
+    .risk-card--bad { border-left-color: var(--status-bad-solid); }
+
+    .risk-card__icon {
+      flex-shrink: 0;
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--status-neutral-bg);
+      color: var(--status-neutral-fg);
+    }
+
+    .risk-card--good .risk-card__icon { background: var(--status-good-bg); color: var(--status-good-fg); }
+    .risk-card--warn .risk-card__icon { background: var(--status-warn-bg); color: var(--status-warn-fg); }
+    .risk-card--bad .risk-card__icon { background: var(--status-bad-bg); color: var(--status-bad-fg); }
+
+    .risk-card__icon svg { width: 1.35rem; height: 1.35rem; }
+
+    .risk-card__body { flex: 1; min-width: 0; }
+
+    .risk-card__primary { margin: 0.15rem 0 0.35rem; }
+
+    .risk-card__badge {
+      display: inline-block;
+      padding: 0.2rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    .risk-card--good .risk-card__badge { background: var(--status-good-bg); color: var(--status-good-fg); }
+    .risk-card--warn .risk-card__badge { background: var(--status-warn-bg); color: var(--status-warn-fg); }
+    .risk-card--bad .risk-card__badge { background: var(--status-bad-bg); color: var(--status-bad-fg); }
+
+    /* Genormaliseerde schaal (0-100%) met beweegbare marker - hergebruikt voor elke
+       risico-indicator zodat groen->rood overal dezelfde betekenis heeft. */
+    .risk-scale { margin-top: 0.7rem; }
+
+    .risk-scale__track {
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(to right, var(--status-good-solid), var(--status-warn-solid), var(--status-bad-solid));
+      position: relative;
+    }
+
+    .risk-scale__marker {
+      position: absolute;
+      top: 50%;
+      width: 18px;
+      height: 18px;
+      background: #263640;
+      border-radius: 50%;
+      border: 3px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+      transform: translate(-50%, -50%);
+    }
+
+    .risk-scale__labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      color: #6f7071;
+      margin-top: 0.3rem;
+    }
+
+    .risk-card__source {
+      margin-top: 0.65rem;
+      font-size: 0.7rem;
+      color: #aaa;
+    }
+
+    /* --- Actiegerichte vervolgstap-knop: na het tonen van een kernresultaat een duidelijk
+       vervolgpad bieden i.p.v. de gebruiker alleen data te laten lezen. --- */
+    .cta-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 1rem;
+      background: #6BBFAE;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .cta-btn:hover { background: #5aab99; }
+    .cta-btn svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+
+    .cta-btn--ghost {
+      background: transparent;
+      color: #263640;
+      border: 1px solid #e0e0e0;
+    }
+
+    .cta-btn--ghost:hover { background: #f5f8f9; border-color: #6BBFAE; }
+
+    .data-loading {
+      color: #6f7071;
+      font-size: 0.85rem;
+      padding: 1rem 0;
+    }
+
+    .data-loading .spinner-sm {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #e8e8e8;
+      border-top-color: #d12335;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 0.4rem;
+    }
+
+    /* --- EP-Online info popup --- */
+    .ep-info-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.2rem;
+      height: 1.2rem;
+      border: none;
+      background: none;
+      color: #6BBFAE;
+      font-size: 1rem;
+      cursor: pointer;
+      vertical-align: middle;
+      margin-left: 0.3rem;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .ep-info-btn:hover { color: #263640; }
+
+    .ep-info-popup {
+      margin-top: 0.5rem;
+      background: #f5f8f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 0.75rem;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .ep-info-popup table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .ep-info-popup td {
+      padding: 0.15rem 0.5rem 0.15rem 0;
+      vertical-align: top;
+      border-bottom: 1px solid #e8e8e8;
+    }
+
+    .ep-info-popup td:first-child {
+      color: #6f7071;
+      white-space: nowrap;
+      font-size: 0.75rem;
+    }
+
+    .ep-info-popup td:last-child {
+      font-weight: 500;
+      word-break: break-word;
+    }
+
+    /* --- Compact table (woning + warmte) --- */
+    .compact-table { width: 100%; font-size: 0.9rem; border-collapse: collapse; }
+    .compact-table td { padding: 0.2rem 0; }
+    .compact-table td:first-child { color: #888; white-space: nowrap; width: 11rem; padding-right: 1rem; vertical-align: top; }
+    .compact-table td:last-child { font-weight: 500; }
+
+    .td-flex { display: flex; justify-content: space-between; align-items: baseline; }
+
+    /* --- Pand-schema (VvE: ligging van appartementen) --- */
+    .pand-schema {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 4px;
+      overflow: hidden;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+
+    .pand-verdieping {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.6rem 0.75rem;
+      background: #f9fafb;
+      border-bottom: 1px solid #eee;
+    }
+
+    .pand-verdieping:last-child { border-bottom: none; }
+
+    .pand-verdieping-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: #6f7071;
+      width: 6.5rem;
+      flex-shrink: 0;
+    }
+
+    .pand-verdieping-units {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      flex: 1;
+    }
+
+    .pand-unit {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.4rem 0.6rem;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      min-width: 5.5rem;
+    }
+
+    .pand-unit-hoek {
+      border-color: #6BBFAE;
+      border-style: dashed;
+    }
+
+    .pand-unit-inferred {
+      opacity: 0.8;
+    }
+
+    .pand-unit-inferred-mark {
+      color: #aaa;
+      font-weight: 400;
+    }
+
+    .pand-unit-adres {
+      color: #263640;
+      font-weight: 500;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .pand-unit-current {
+      color: #6BBFAE;
+      font-weight: 700;
+    }
+
+    .pand-unit-clickable {
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .pand-unit-clickable:hover {
+      border-color: #6BBFAE;
+      box-shadow: 0 0 0 1px #6BBFAE;
+    }
+
+    /* --- Info link --- */
+    .info-link {
+      font-style: italic;
+      font-size: 0.8rem;
+      color: #2e2e33;
+      cursor: pointer;
+      border: none;
+      background: none;
+      padding: 0;
+      text-decoration: underline;
+      margin-left: 0.5rem;
+    }
+
+    .info-link:hover { color: #d12335; }
+
+    /* --- Sectiekaart: elke sectie (Uw woning/Dakoppervlak/Adressen in dit pand/Buurt/Kaart/Alle
+       kenmerken) krijgt een lichtgetinte achtergrond + gekleurde kaderrand, zodat ze duidelijk
+       van elkaar en van de pagina-achtergrond te onderscheiden zijn - zonder terug te vallen op
+       een los dashboard-grid: de secties blijven onder elkaar in dezelfde doorlopende volgorde. --- */
+    .sectie {
+      background: #f6faf9;
+      border: 1px solid #dbe7e4;
+      border-left: 4px solid #6BBFAE;
+      border-radius: 10px;
+      padding: 1.5rem 1.5rem 1.75rem;
+      margin-top: 1.5rem;
+      box-shadow: 0 1px 3px rgba(38, 54, 64, 0.05);
+    }
+
+    .sectie--primair {
+      background: linear-gradient(160deg, #eef8f5 0%, #f6faf9 55%);
+      border-left-width: 6px;
+      margin-top: 0;
+    }
+
+    .sectie-titel {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #1a2226;
+      margin-bottom: 1rem;
+    }
+
+    /* --- Snelle navigatie: springt naar een sectie verderop op dezelfde pagina (Funda's
+       Foto's/Plattegrond/360°-balk als voorbeeld) - icoon + label, geen kaartjes-grid, verbergt
+       niets. --- */
+    .media-nav {
+      display: none;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.75rem;
+      padding: 0.85rem 0.1rem;
+      border-bottom: 1px solid #e0e6e8;
+      margin-bottom: 1.5rem;
+    }
+
+    .media-nav.active { display: flex; }
+
+    .media-nav-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: none;
+      border: none;
+      color: #2b7d6a;
+      font-size: 0.88rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      padding: 0;
+      white-space: nowrap;
+    }
+
+    .media-nav-item:hover { text-decoration: underline; }
+    .media-nav-item svg { width: 1.15rem; height: 1.15rem; flex-shrink: 0; }
+    .media-nav-item .media-nav-count { color: #8a97a0; font-weight: 500; }
+
+    /* --- Buurt-statistiekjes: compacte cijfers op een rij (Funda-stijl), i.p.v. de eerdere
+       uitputtige CBS-tabel met tientallen velden. --- */
+    .buurt-statjes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .buurt-statje__waarde { font-size: 1.3rem; font-weight: 700; color: #1a2226; line-height: 1.2; }
+    .buurt-statje__label { font-size: 0.78rem; color: #6f7071; margin-top: 0.15rem; }
+
+    @media print {
+      .sticky-header, .loading, .error,
+      .source-link, .info-link, body::after { display: none !important; }
+      body { background: #fff; }
+    }
+
+    /* --- Prototype watermark --- */
+    body::after {
+      content: 'PROTOTYPE';
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-35deg);
+      font-size: 8rem;
+      font-weight: 900;
+      color: rgba(0, 0, 0, 0.06);
+      pointer-events: none;
+      z-index: 9999;
+      white-space: nowrap;
+      letter-spacing: 0.2em;
+      user-select: none;
+    }
+
+    @media (max-width: 600px) {
+      body::after { font-size: 4rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="sticky-header">
+      <h1 class="page-title">Adresverkenner</h1>
+
+      <!-- Zoekbalk -->
+      <div class="search-box">
+        <div class="input-wrap">
+          <input
+            type="text"
+            id="address-input"
+            placeholder="Zoek een adres, bijv. Dam 1, Amsterdam"
+            aria-label="Zoek een adres"
+            autocomplete="off"
+          >
+          <button class="input-clear" id="input-clear" type="button" title="Wis zoekveld" onclick="clearSearch()">✕</button>
+        </div>
+        <div class="suggestions" id="suggestions"></div>
+      </div>
+    </div>
+
+    <div class="loading" id="loading">
+      <span class="spinner"></span> Gegevens ophalen...
+    </div>
+
+    <div class="error" id="error"></div>
+
+    <div class="results" id="results">
+      <!-- Snelle navigatie: springt naar een sectie verderop op dezelfde doorlopende pagina
+           (i.t.t. de vroegere hoofdnavigatie verbergt dit niets - alle secties blijven zichtbaar). -->
+      <div class="media-nav" id="media-nav"></div>
+
+      <!-- 1-5. Titelblok, kenmerkenregel, samenvatting, WOZ-waarde en gegroepeerde kenmerken -
+           doorlopend dossier-achtig opgebouwd (Funda-structuur vertaald naar onze eigen data),
+           i.p.v. een dashboard van losse kaartjes. -->
+      <div id="pagina-kop" class="sectie sectie--primair" style="display:none">
+        <h2 class="pagina-titel" id="pagina-titel">&nbsp;</h2>
+        <div class="pagina-subtitel" id="pagina-subtitel"></div>
+        <div class="kenmerken-regel" id="kenmerken-regel"></div>
+        <p class="pagina-samenvatting" id="pagina-samenvatting"></p>
+
+        <div class="woz-blok" id="woz-blok"></div>
+
+        <div id="kenmerken-secties"></div>
+
+        <div id="perceel-diagram" style="margin-top:1.25rem;"></div>
+      </div>
+
+      <!-- 6. Dakoppervlak (3D BAG) - visueel zwaartepunt van de pagina -->
+      <div id="dak-card" class="sectie" style="display:none">
+        <h2 class="sectie-titel">Dakoppervlak</h2>
+        <div id="dak-data"></div>
+      </div>
+
+      <!-- 7. Vergelijkbare woningen: overige adressen in dit pand + huisnummerbereik-zoektool -->
+      <div id="vve-card" class="sectie" style="display:none">
+        <h2 class="sectie-titel" id="vve-card-title-text">Adressen in dit pand</h2>
+        <div id="vve-data">
+          <div id="vve-pand-schema"></div>
+          <div id="vve-range-section" style="margin-top:1rem;">
+            <p style="font-size:0.75rem;color:#6f7071;margin-bottom:0.5rem;">Een VvE of blok grondgebonden woningen kan uit meerdere panden bestaan. Controleer dit door een huisnummerbereik op dezelfde straat te doorzoeken &mdash; pas het bereik zo nodig aan.</p>
+            <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem;">
+              <label style="font-size:0.85rem;">Van <input type="number" id="vve-range-van" style="width:5rem;padding:0.3rem;border:1px solid #e0e0e0;border-radius:3px;font-family:inherit;"></label>
+              <label style="font-size:0.85rem;">tot <input type="number" id="vve-range-tot" style="width:5rem;padding:0.3rem;border:1px solid #e0e0e0;border-radius:3px;font-family:inherit;"></label>
+              <div style="display:flex;align-items:center;gap:0.75rem;">
+                <label style="display:inline-flex;align-items:center;gap:0.3rem;font-size:0.85rem;cursor:pointer;"><input type="checkbox" id="vve-range-even" checked style="accent-color:#6BBFAE;">Even</label>
+                <label style="display:inline-flex;align-items:center;gap:0.3rem;font-size:0.85rem;cursor:pointer;"><input type="checkbox" id="vve-range-oneven" checked style="accent-color:#6BBFAE;">Oneven</label>
+              </div>
+              <button type="button" class="cta-btn" onclick="searchVveRange()">Zoeken</button>
+            </div>
+            <p style="font-size:0.75rem;color:#aaa;margin:-0.15rem 0 0.5rem;">Veel blokken grondgebonden woningen liggen alleen aan de even of alleen aan de oneven kant van de straat.</p>
+            <div id="vve-range-results"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. Buurt: CBS-statistiekjes + Klimaateffectatlas (mag, i.t.t. de rest van de pagina,
+           wel kleur gebruiken - waarschuwings-/geruststellingsfunctie). -->
+      <div id="buurt-sectie" class="sectie" style="display:none">
+        <h2 class="sectie-titel">Buurt</h2>
+        <div class="buurt-statjes" id="buurt-statjes">
+          <span class="data-loading"><span class="spinner-sm"></span> Buurtdata ophalen...</span>
+        </div>
+        <div id="klimaat-data" style="margin-top:1.25rem;">
+          <span class="data-loading"><span class="spinner-sm"></span> Klimaatdata ophalen...</span>
+        </div>
+      </div>
+
+      <!-- 9. Kaart -->
+      <div id="map-fold" class="sectie" style="display:none">
+        <h2 class="sectie-titel">Locatie op kaart</h2>
+        <div class="map-container" id="map-container"></div>
+      </div>
+
+      <!-- 10. Volledige adres- en gebouwgegevens: sobere tabel onderaan, voor wie dieper wil
+           kijken (vergelijkbaar met Funda's "Bekijk alle kenmerken"). -->
+      <div id="details-card" class="sectie" style="display:none">
+        <h2 class="sectie-titel">Alle kenmerken</h2>
+        <div class="data-grid" id="address-data"></div>
+        <div class="data-grid" id="building-data" style="margin-top:1rem;"></div>
+      </div>
+
+      <!-- Bron -->
+      <div class="source-link" id="source-link"></div>
+    </div>
+  </div>
+
+
+  <script>
+    const LOCATIESERVER = 'https://api.pdok.nl/bzk/locatieserver/search/v3_1';
+    const BAG_API = 'https://api.pdok.nl/kadaster/bag/ogc/v2';
+    const CBS_API = 'https://opendata.cbs.nl/ODataApi/OData/85984NED';
+    const KADASTRALEKAART_WFS = 'https://service.pdok.nl/kadaster/kadastralekaart/wfs/v5_0';
+    // api.3dbag.nl stuurt geen CORS-headers, dus dit loopt via een eigen PHP-proxy (3dbag-proxy.php).
+    const THREEDBAG_PROXY_URL = 'https://adresverkenner.nl/helpers/3dbag-proxy.php';
+    // Alle Haarlem-specifieke gegevens (warmteprogramma, erfgoed, fundering, 2D-dakoppervlak en
+    // de VvE-clusterindex) lopen via een PHP-proxy op adresverkenner.nl. Zo staan geen bron-URL's,
+    // laagnamen of clusterdata in deze (publieke) code. De proxy laat alleen requests van
+    // bekende origins toe. Lokaal testen: `php -S localhost:8788` in de map met orvelis.php.
+    const EXTRA_DATA_URL = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+      ? 'http://localhost:8788/orvelis.php'
+      : 'https://adresverkenner.nl/helpers/orvelis.php';
+    // Elke BAG pand-ID begint met de CBS-gemeentecode; 0392 is Haarlem. Hiermee kan een pand als
+    // "in Haarlem" herkend worden puur op zijn ID, zonder adresgegevens (met gemeentenaam) nodig
+    // te hebben - relevant voor de ?pandid=/?bagid=-instapstromen, die zonder adreszoekopdracht
+    // starten en dus geen `currentAdres.gemeentenaam` tot hun beschikking hebben.
+    const HAARLEM_GEMEENTECODE = '0392';
+    function isHaarlemsPand(pandId) {
+      return typeof pandId === 'string' && pandId.startsWith(HAARLEM_GEMEENTECODE);
+    }
+    const DAKPAN_KLEUR = '#a0522d';   // schuin dak: dakpankleur (terracotta)
+    const PLAT_DAK_KLEUR = '#8a8a8a'; // plat dak: middengrijs
+    // Platte daken met zonnepanelen op een opstelsysteem meten vaak 10-15° (de kanteling van de
+    // panelen zelf), niet 0° - dus een lage drempel classificeert die ten onrechte als schuin dak.
+    // Boven ~20° is het vrijwel zeker een echt hellend dak (NL pitched daken zitten doorgaans op
+    // 30-60°). Het gebied ertussen (TWIJFEL_MIN-TWIJFEL_MAX) is niet betrouwbaar te onderscheiden
+    // op hellingshoek alleen, dus die vlakken markeren we als twijfelgeval i.p.v. stellig te kiezen.
+    const PLAT_DAK_HELLING_GRENS = 15;
+    const TWIJFEL_MIN = 10;
+    const TWIJFEL_MAX = 20;
+    function isTwijfelgeval(hellingshoek) {
+      return hellingshoek >= TWIJFEL_MIN && hellingshoek <= TWIJFEL_MAX;
+    }
+    const KEA_WFS = 'https://cas.cloud.sogelink.com/public/data/org/gws/YWFMLMWERURF/kea_public/wfs';
+
+    // --- Modus op basis van trefwoord in de URL ---
+    // "haarlem" in de URL: toon warmteprogramma/erfgoedstatus (naast dat het adres ook
+    // daadwerkelijk in Haarlem moet liggen). "dakcheck" in de URL: toon alleen de woning- en
+    // dakoppervlak-kaart, de rest (vergelijkbare woningen, kaart, adres-/gebouwgegevens) niet.
+    const urlKeyword = window.location.href.toLowerCase();
+    const SHOW_HAARLEM_INFO = urlKeyword.includes('haarlem');
+    const DAKCHECK_MODE = urlKeyword.includes('dakcheck');
+    // Voor gebruik in een iframe (bijv. een VvE-dashboard dat alleen de pand-aggregatie via
+    // ?pandid=/?bagid= wil tonen): geen zoekveld en geen adres-specifieke gegevens ("Uw woning"),
+    // alleen het Dakoppervlak-kaartje.
+    const EMBEDDED_MODE = urlKeyword.includes('embedded');
+
+    if (DAKCHECK_MODE || SHOW_HAARLEM_INFO) {
+      const pageTitle = DAKCHECK_MODE ? 'Dakchecker' : 'Haarlemse Adresverkenner';
+      document.title = pageTitle;
+      const pageTitleEl = document.querySelector('.page-title');
+      if (pageTitleEl) pageTitleEl.textContent = pageTitle;
+    }
+
+    if (EMBEDDED_MODE) {
+      // Titel, zoekveld en snelnavigatie zijn overbodig als er toch maar één kaartje
+      // (Dakoppervlak) te zien is - hele sticky header verbergen (i.p.v. losse onderdelen),
+      // anders blijft de padding van .sticky-header als lege witte balk bovenin staan.
+      const stickyHeaderEl = document.querySelector('.sticky-header');
+      if (stickyHeaderEl) stickyHeaderEl.style.display = 'none';
+
+      // pagina-kop/dak-card/vve-card starten al verborgen (zie HTML), maar map-fold en
+      // details-card niet - die worden normaal pas verborgen door de reset-logica in
+      // selectSuggestion, wat we in embedded modus overslaan (geen adres wordt geselecteerd).
+      ['pagina-kop', 'vve-card', 'map-fold', 'details-card'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+    }
+
+    // In een iframe (bijv. embedded in een VvE-dashboard) kan deze pagina zichzelf niet sluiten -
+    // dat kan alleen de omringende pagina. Bij Escape sturen we daarom een postMessage naar de
+    // parent; het dashboard moet daar zelf op luisteren om de iframe/modal te sluiten:
+    //   window.addEventListener('message', (e) => {
+    //     if (e.data?.source === 'adresverkenner' && e.data?.action === 'close') { ...sluit de iframe... }
+    //   });
+    const IN_IFRAME = window.self !== window.top;
+    if (IN_IFRAME) {
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          window.parent.postMessage({ source: 'adresverkenner', action: 'close' }, '*');
+        }
+      });
+    }
+
+    const input = document.getElementById('address-input');
+    const suggestionsEl = document.getElementById('suggestions');
+    const loadingEl = document.getElementById('loading');
+    const resultsEl = document.getElementById('results');
+    const errorEl = document.getElementById('error');
+    const clearBtn = document.getElementById('input-clear');
+
+    // Wisknopje tonen/verbergen
+    function updateClearBtn() {
+      clearBtn.style.display = input.value.length > 0 ? 'block' : 'none';
+    }
+    input.addEventListener('input', updateClearBtn);
+    input.addEventListener('change', updateClearBtn);
+
+    function clearSearch() {
+      input.value = '';
+      clearBtn.style.display = 'none';
+      hideSuggestions();
+      hideResults();
+      hideError();
+      input.focus();
+
+      const url = new URL(window.location.href);
+      url.searchParams.delete('id');
+      history.replaceState(null, '', url);
+      meldUrlAanOuder();
+    }
+
+    // Draait de app in een iframe (de placeholder op adresverkenner.nl), dan verandert
+    // history.replaceState alleen de URL van het iframe. De placeholder zet de query dan over op
+    // de adresbalk, zodat delen/verversen van een gekozen adres ook daar blijft werken.
+    function meldUrlAanOuder() {
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'adresverkenner:url', search: window.location.search }, '*');
+      }
+    }
+
+    let debounceTimer = null;
+    let currentSuggestions = [];
+
+    // State
+    let currentBagProps = null;
+    let currentAdres = null;
+    let currentWozWaarden = null; // de 3 meest recente WOZ-waardes, nieuwste eerst
+    let currentPerceelOppervlakte = null;
+    let currentPerceelGeometryRD = null;
+    let currentPandGeometryRD = null;
+    let perceelGeomAttempted = false;
+    let pandGeomAttempted = false;
+    let currentDakData = null;
+    let currentWarmteprogramma = null;
+    let currentFundering = null;
+    let currentDakDelen = null;
+    let currentBuildingFaces = null;
+    let currentDak2D = null;
+    let currentEnergielabel = null;
+    let currentEnergielabelInfo = null;
+    let currentPand = null;
+    let currentHitteData = null;
+    let currentOverstromingData = null;
+    let currentWozStatus = null; // null = nog bezig; anders een korte eindmelding zonder cijfer
+    let currentEnergielabelStatus = null; // null = nog bezig; 'not_found' | 'error'
+
+
+    // --- VvE huisnummerbereik: handmatige aanpassing overschrijft het voorgestelde bereik niet meer ---
+    ['vve-range-van', 'vve-range-tot'].forEach(id => {
+      document.getElementById(id).addEventListener('input', (e) => { e.target.dataset.auto = 'false'; });
+    });
+    ['vve-range-even', 'vve-range-oneven'].forEach(id => {
+      document.getElementById(id).addEventListener('change', (e) => { e.target.dataset.auto = 'false'; });
+    });
+
+    // --- Adres suggesties ---
+    input.addEventListener('input', () => {
+      const q = input.value.trim();
+      clearTimeout(debounceTimer);
+
+      if (q.length < 2) {
+        hideSuggestions();
+        return;
+      }
+
+      debounceTimer = setTimeout(() => fetchSuggestions(q), 250);
+    });
+
+    let selectedIdx = -1;
+
+    input.addEventListener('keydown', (e) => {
+      const items = suggestionsEl.querySelectorAll('.suggestion-item');
+      if (!items.length) {
+        if (e.key === 'Escape') hideSuggestions();
+        return;
+      }
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedIdx = Math.min(selectedIdx + 1, items.length - 1);
+        updateSelected(items);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedIdx = Math.max(selectedIdx - 1, 0);
+        updateSelected(items);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (selectedIdx >= 0 && selectedIdx < currentSuggestions.length) {
+          selectSuggestion(currentSuggestions[selectedIdx]);
+        } else if (currentSuggestions.length === 1) {
+          selectSuggestion(currentSuggestions[0]);
+        }
+      } else if (e.key === 'Escape') {
+        hideSuggestions();
+      }
+    });
+
+    function updateSelected(items) {
+      items.forEach((el, i) => {
+        el.classList.toggle('active', i === selectedIdx);
+        if (i === selectedIdx) el.scrollIntoView({ block: 'nearest' });
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.search-box')) hideSuggestions();
+    });
+
+    // Splitst "Hermitage 1, 2134AC Hoofddorp" in straat+huisnummer (hoofdregel) en postcode+
+    // plaats (herkenbare sub-regel met icoon) - de laatste komma is hier betrouwbaar, want de
+    // gemarkeerde <b>-tags van de Locatieserver-highlighting staan nooit rond een komma.
+    function formatSuggestionDisplay(display) {
+      const idx = display.lastIndexOf(', ');
+      if (idx === -1) return `<span class="suggestion-main">${display}</span>`;
+      const straat = display.slice(0, idx);
+      const plaats = display.slice(idx + 2);
+      return `<span class="suggestion-main">${straat}</span>`
+        + `<span class="suggestion-place">${ICONS.mapPin}${plaats}</span>`;
+    }
+
+    async function fetchSuggestions(query) {
+      try {
+        const fq = '&fq=type:adres';
+        const url = `${LOCATIESERVER}/suggest?q=${encodeURIComponent(query)}${fq}&rows=7`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        currentSuggestions = data.response.docs;
+        const highlighting = data.highlighting || {};
+
+        if (currentSuggestions.length === 0) {
+          hideSuggestions();
+          return;
+        }
+
+        suggestionsEl.innerHTML = currentSuggestions.map((doc, i) => {
+          const hl = highlighting[doc.id];
+          const display = hl?.suggest?.[0] || doc.weergavenaam;
+          return `<div class="suggestion-item" data-index="${i}">${formatSuggestionDisplay(display)}</div>`;
+        }).join('');
+
+        selectedIdx = -1;
+        suggestionsEl.classList.add('active');
+
+        suggestionsEl.querySelectorAll('.suggestion-item').forEach(item => {
+          item.addEventListener('click', () => {
+            const idx = parseInt(item.dataset.index);
+            selectSuggestion(currentSuggestions[idx]);
+          });
+        });
+      } catch (err) {
+        console.error('Suggest error:', err);
+      }
+    }
+
+    function hideSuggestions() {
+      suggestionsEl.classList.remove('active');
+      suggestionsEl.innerHTML = '';
+      selectedIdx = -1;
+    }
+
+    // --- Adres selecteren en data ophalen ---
+    async function selectSuggestion(doc) {
+      input.value = doc.weergavenaam || '';
+      hideSuggestions();
+      showLoading();
+      hideResults();
+      hideError();
+      currentBagProps = null;
+      currentAdres = null;
+      currentWozWaarden = null;
+      currentPerceelOppervlakte = null;
+      currentPerceelGeometryRD = null;
+      currentPandGeometryRD = null;
+      perceelGeomAttempted = false;
+      pandGeomAttempted = false;
+      currentDakData = null;
+      currentDakDelen = null;
+      currentBuildingFaces = null;
+      currentDak2D = null;
+      currentWarmteprogramma = null;
+      currentFundering = null;
+      currentEnergielabel = null;
+      currentEnergielabelInfo = null;
+      currentEnergielabelClip = '';
+      currentPand = null;
+      currentHitteData = null;
+      currentOverstromingData = null;
+      currentWozStatus = null;
+      currentEnergielabelStatus = null;
+
+      // Reset UI: elke sectie terug naar zichtbaar/standaard.
+      // In dakcheck-modus blijven vve-card/buurt-sectie/map-fold/details-card altijd verborgen.
+      ['pagina-kop', 'dak-card', 'vve-card', 'buurt-sectie', 'map-fold', 'details-card'].forEach(id => {
+        const el = document.getElementById(id);
+        const altijdVerborgen = DAKCHECK_MODE && (id === 'vve-card' || id === 'buurt-sectie' || id === 'map-fold' || id === 'details-card');
+        el.style.display = altijdVerborgen ? 'none' : (id === 'pagina-kop' || id === 'dak-card' || id === 'vve-card') ? 'none' : 'block';
+        delete el.dataset.hasContent;
+      });
+      document.getElementById('perceel-diagram').innerHTML = '<span class="data-loading"><span class="spinner-sm"></span> Kadastrale kaart laden...</span>';
+      window.stopDakViewer?.();
+
+      try {
+        // Stap 1: Lookup voor volledige adresdata
+        const lookupUrl = `${LOCATIESERVER}/lookup?id=${encodeURIComponent(doc.id)}&fl=*`;
+        const lookupRes = await fetch(lookupUrl);
+        const lookupData = await lookupRes.json();
+
+        if (!lookupData.response.docs.length) {
+          throw new Error('Geen gegevens gevonden voor dit adres.');
+        }
+
+        const adres = lookupData.response.docs[0];
+        currentAdres = adres;
+
+        // Zoekveld en URL bijwerken met het definitieve adres (ook nodig als selectSuggestion
+        // is aangeroepen zonder weergavenaam, bijv. bij het herstellen vanuit de URL).
+        input.value = adres.weergavenaam || '';
+        const url = new URL(window.location.href);
+        url.searchParams.set('id', doc.id);
+        history.replaceState(null, '', url);
+        meldUrlAanOuder();
+
+        // Render adresgegevens tab (harmless als details-card verborgen is in dakcheck-modus;
+        // zet ook meteen de "Bekijk in BAG Viewer"-link, die we altijd willen houden)
+        renderAddressData(adres);
+
+        if (!DAKCHECK_MODE) {
+          // Render kaart
+          renderMap(adres);
+
+          resetBuurtSectie();
+        }
+
+        // Render woning card (zonder BAG-data)
+        renderWoningData(adres, null);
+
+        showResults();
+        hideLoading();
+
+        if (!DAKCHECK_MODE) {
+          // Kaart en adres-/gebouwgegevens zijn altijd meteen beschikbaar (geen aparte fetch-stap);
+          // buurt-sectie toont meteen zijn eigen laad-placeholders.
+          document.getElementById('map-fold').dataset.hasContent = 'true';
+          document.getElementById('details-card').dataset.hasContent = 'true';
+          document.getElementById('buurt-sectie').dataset.hasContent = 'true';
+        }
+
+        // Stap 2: Parallel alle extra data ophalen (resultaten verschijnen progressief)
+        const promises = [];
+
+        promises.push(fetchBagData(adres));
+
+        if (!DAKCHECK_MODE && adres.buurtcode) {
+          promises.push(fetchCBSData(adres.buurtcode));
+        }
+
+        if (!DAKCHECK_MODE && adres.buurtcode) {
+          promises.push(fetchKlimaatData(adres.buurtcode));
+        }
+
+        if (adres.nummeraanduiding_id) {
+          promises.push(fetchWozData(adres.nummeraanduiding_id));
+        }
+
+        promises.push(fetchPerceelData(adres));
+
+        promises.push(fetchEnergielabel(adres));
+
+        if (SHOW_HAARLEM_INFO && (adres.gemeentenaam === 'Haarlem') && adres.adresseerbaarobject_id) {
+          promises.push(fetchWarmteprogramma(adres));
+          promises.push(fetchFundering(adres));
+        }
+
+        await Promise.allSettled(promises);
+
+      } catch (err) {
+        hideLoading();
+        showError(err.message);
+      }
+    }
+
+    // --- Een blokje uit "vergelijkbare woningen" / "adressen in dit pand" aanklikken:
+    // dat adres wordt behandeld als een nieuwe zoekopdracht, alsof de gebruiker het zelf had opgezocht.
+    async function selectAddressByBagId(bagid) {
+      if (!bagid) return false;
+      try {
+        const url = `${LOCATIESERVER}/free?q=*&fq=type:adres&fq=adresseerbaarobject_id:${encodeURIComponent(bagid)}&rows=1&fl=id,weergavenaam`;
+        const res = await fetch(url);
+        if (!res.ok) return false;
+        const data = await res.json();
+        const doc = data.response?.docs?.[0];
+        if (!doc) return false;
+
+        await selectSuggestion(doc);
+        document.getElementById('pagina-kop')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return true;
+      } catch (err) {
+        console.warn('Adres selecteren via blokje mislukt:', err);
+        return false;
+      }
+    }
+
+    document.addEventListener('click', (e) => {
+      const chip = e.target.closest('.pand-unit-clickable');
+      if (chip?.dataset.bagid) {
+        selectAddressByBagId(chip.dataset.bagid);
+      }
+    });
+
+    // Buurt-sectie (CBS-statjes + Klimaateffectatlas) terug naar de laad-placeholder bij een
+    // nieuw adres, anders blijft data van het vorige adres even zichtbaar staan.
+    function resetBuurtSectie() {
+      const statjes = document.getElementById('buurt-statjes');
+      const klimaat = document.getElementById('klimaat-data');
+      if (statjes) statjes.innerHTML = '<span class="data-loading"><span class="spinner-sm"></span> Buurtdata ophalen...</span>';
+      if (klimaat) klimaat.innerHTML = '<span class="data-loading"><span class="spinner-sm"></span> Klimaatdata ophalen...</span>';
+    }
+
+    // --- BAG data ophalen ---
+    async function fetchBagData(adres) {
+      const objectId = adres.adresseerbaarobject_id;
+      if (!objectId) return;
+
+      const typeCode = objectId.substring(4, 6);
+      const objectTypes = { '01': 'verblijfsobject', '02': 'ligplaats', '03': 'standplaats' };
+      const objectType = objectTypes[typeCode] || 'verblijfsobject';
+
+      try {
+        const objUrl = `${BAG_API}/collections/${objectType}/items?identificatie=${objectId}&limit=1`;
+        const objRes = await fetch(objUrl);
+
+        if (objRes.ok) {
+          const objData = await objRes.json();
+          if (objData.features?.length) {
+            const feature = objData.features[0];
+            const props = feature.properties;
+            currentBagProps = props;
+
+            // Object-velden toevoegen aan adresgegevens-tab
+            if (!DAKCHECK_MODE) renderObjectData(props, objectType);
+
+            // Update woning card met BAG-data
+            renderWoningData(adres, props);
+
+            // Pand ophalen
+            if (props['pand.href']?.length) {
+              await fetchPand(props['pand.href'][0]);
+            } else {
+              pandGeomAttempted = true;
+              renderPerceelDiagram();
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('BAG data ophalen mislukt:', err);
+      }
+    }
+
+    async function fetchPand(pandUrl) {
+      try {
+        // RD-coordinaten opvragen zodat de pandcontour samen met het perceel (ook in RD)
+        // getekend kan worden in het perceel/bebouwing-diagram.
+        const rdUrl = `${pandUrl}?crs=${encodeURIComponent('http://www.opengis.net/def/crs/EPSG/0/28992')}`;
+        const pandRes = await fetch(rdUrl, { headers: { 'Accept': 'application/json' } });
+
+        if (pandRes.ok) {
+          const pandFeature = await pandRes.json();
+          const pand = pandFeature.properties || pandFeature;
+          currentPand = pand;
+          if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+          if (!DAKCHECK_MODE) {
+            renderBuildingData(pand);
+            setupVveSection(pand, currentBagProps?.identificatie);
+          }
+
+          currentPandGeometryRD = pandFeature.geometry?.type === 'Polygon' ? pandFeature.geometry.coordinates : null;
+
+          fetchDakDataVoorPand(pand);
+        }
+      } catch (err) {
+        console.warn('Pand data ophalen mislukt:', err);
+      } finally {
+        pandGeomAttempted = true;
+        renderPerceelDiagram();
+      }
+    }
+
+    // --- Dakoppervlak ophalen (3D BAG) ---
+    // Haalt ruwe 3D BAG-attributen + berekende vlakken op voor één pand-ID, zonder te renderen
+    // (gedeeld door fetchDakData en de VvE-aggregatie hieronder).
+    async function fetchDakAttrsEnVlakken(pandIdentificatie) {
+      const url = `${THREEDBAG_PROXY_URL}?pandid=${encodeURIComponent(pandIdentificatie)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.json();
+      if (data._httpStatus && data._httpStatus >= 400) throw new Error(`3D BAG HTTP ${data._httpStatus}`);
+
+      const attrs = data.feature?.CityObjects?.[data._objectId]?.attributes;
+      if (!attrs) throw new Error('Geen 3D BAG-attributen gevonden');
+
+      return { attrs, faces: computeBuildingFaces(data) };
+    }
+
+    async function fetchDakData(pandIdentificatie, aantalVerblijfsobjecten) {
+      if (!pandIdentificatie) return;
+
+      const card = document.getElementById('dak-card');
+      const container = document.getElementById('dak-data');
+      card.style.display = 'block';
+      card.dataset.hasContent = 'true';
+      container.innerHTML = '<span class="data-loading"><span class="spinner-sm"></span> Dakoppervlak ophalen...</span>';
+
+      try {
+        const { attrs, faces } = await fetchDakAttrsEnVlakken(pandIdentificatie);
+        currentDakData = attrs;
+        currentBuildingFaces = faces;
+        currentDakDelen = currentBuildingFaces.filter(v => v.type === 'RoofSurface').sort((a, b) => b.oppervlak - a.oppervlak);
+        renderDakData(attrs, currentDakDelen, aantalVerblijfsobjecten);
+        renderPerceelDiagram();
+        // Geen SHOW_HAARLEM_INFO-check nodig: isHaarlemsPand() filtert al op pand-ID, dus dit is
+        // ook zonder "haarlem" in de URL een goedkope no-op voor panden buiten Haarlem.
+        fetchDakVergelijking2D([pandIdentificatie]);
+      } catch (err) {
+        console.warn('3D BAG dakoppervlak ophalen mislukt:', err);
+        container.innerHTML = '<p style="color:#888;font-size:0.85rem;">Dakoppervlak niet beschikbaar (nog geen 3D BAG-model voor dit pand).</p>';
+      }
+    }
+
+    // --- 2D-dakoppervlak ter vergelijking (alleen gemeente Haarlem, kaart.haarlem.nl) ---
+    // De zonnekansenkaart van de gemeente geeft per dakvlak een "platte", verticaal geprojecteerde
+    // 2D-oppervlakte (zoals op een kadastrale/GIS-kaart) i.p.v. de werkelijke, hellingshoek-
+    // gecorrigeerde 3D-oppervlakte uit 3D BAG. Bij een plat dak zijn beide vrijwel gelijk; bij een
+    // schuin dak is de 3D-waarde principieel groter (met een factor 1/cos(helling)) - geen fout in
+    // een van beide bronnen, maar precies het verschil dat deze vergelijking laat zien.
+    async function fetchDakVergelijking2D(pandIds) {
+      currentDak2D = null;
+      renderDak2DVergelijking(); // eventuele vergelijking van een vorig pand meteen wegvegen
+
+      const haarlemseIds = (pandIds || []).filter(isHaarlemsPand);
+      if (!haarlemseIds.length) return;
+
+      try {
+        const res = await fetch(`${EXTRA_DATA_URL}?action=dak2d&pandid=${haarlemseIds.join(',')}`);
+        if (!res.ok) return;
+
+        // De proxy telt de dakvlakken van de zonnekansenkaart zelf al op per plat/schuin.
+        const data = await res.json();
+        if (!(data.aantalVlakken > 0)) return;
+        currentDak2D = { totaal: data.totaal, plat: data.plat, schuin: data.schuin, aantalVlakken: data.aantalVlakken };
+      } catch (err) {
+        console.warn('2D-dakoppervlak (kaart.haarlem.nl) ophalen mislukt:', err);
+      } finally {
+        renderDak2DVergelijking();
+      }
+    }
+
+    // Bij een normale adreszoekopdracht weten we maar één pand-ID; check eerst of dat pand
+    // volgens de VvE-clusterindex bij andere panden hoort (bijv. een rijtje losse rijwoning-
+    // pandjes dat samen één VvE vormt) en gebruik dan de multi-pand aggregatie i.p.v. alleen
+    // dit ene pand.
+    async function fetchDakDataVoorPand(pand) {
+      const cluster = await expandeerVveCluster([pand.identificatie]);
+      if (cluster.length > 1) {
+        fetchDakDataVoorPanden(cluster);
+      } else {
+        fetchDakData(pand.identificatie, pand.aantal_verblijfsobjecten);
+      }
+    }
+
+    // --- VvE met meerdere panden: 3D BAG-data per pand ophalen en combineren ---
+    async function resolvePandIdentificatieVoorBagid(bagid) {
+      const { pandHref } = await fetchVboExtraForBagid(bagid);
+      if (!pandHref) return null;
+      try {
+        const res = await fetch(pandHref, { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) return null;
+        const feature = await res.json();
+        return (feature.properties || feature).identificatie || null;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    // Telbare velden optellen, hoogtes samenvatten als min/max resp. gemiddelde over de panden.
+    function aggregeerPandAttributen(attrsLijst) {
+      const som = (veld) => attrsLijst.reduce((s, a) => s + (a[veld] || 0), 0);
+      const waarden = (veld) => attrsLijst.map(a => a[veld]).filter(v => v != null);
+      const min = (veld) => { const v = waarden(veld); return v.length ? Math.min(...v) : null; };
+      const max = (veld) => { const v = waarden(veld); return v.length ? Math.max(...v) : null; };
+      const gem = (veld) => { const v = waarden(veld); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+
+      return {
+        b3_opp_dak_plat: som('b3_opp_dak_plat'),
+        b3_opp_dak_schuin: som('b3_opp_dak_schuin'),
+        b3_dak_type: 'multiple',
+        b3_volume_lod22: som('b3_volume_lod22'),
+        b3_bouwlagen: max('b3_bouwlagen'),
+        b3_h_maaiveld: gem('b3_h_maaiveld'),
+        b3_h_dak_min: min('b3_h_dak_min'),
+        b3_h_dak_max: max('b3_h_dak_max'),
+        b3_opp_grond: som('b3_opp_grond'),
+        b3_opp_buitenmuur: som('b3_opp_buitenmuur'),
+        b3_opp_scheidingsmuur: som('b3_opp_scheidingsmuur'),
+      };
+    }
+
+    // VvE-clusterindex (pandid -> alle pandid's in dezelfde VvE, zichzelf inbegrepen) - vooral
+    // relevant voor de ?pandid=/?bagid= dakcheck-embedflow: een dashboard geeft soms maar één
+    // pand-ID van een VvE door, terwijl de dakaggregatie eigenlijk het hele cluster zou moeten
+    // omvatten. De index zelf staat niet in deze code maar achter een proxy; per pand-ID
+    // wordt het cluster opgevraagd en onthouden (ook "geen cluster" = alleen het pand zelf).
+    const vveClusterCache = new Map(); // pand-ID -> array pand-ID's (zichzelf inbegrepen)
+
+    // Vult een lijst pand-ID's aan met alle overige panden uit hetzelfde VvE-cluster (indien
+    // bekend) - idempotent, dus ook veilig als de lijst al compleet was. Bij een proxyfout valt
+    // dit terug op alleen de opgegeven panden (zoals voor een pand zonder cluster).
+    async function expandeerVveCluster(pandIds) {
+      // Alleen Haarlemse panden kunnen in de index staan; de rest hoeft de proxy niet te raken.
+      const onbekend = [...new Set(pandIds)].filter(id => isHaarlemsPand(id) && !vveClusterCache.has(id));
+      if (onbekend.length) {
+        try {
+          const res = await fetch(`${EXTRA_DATA_URL}?action=cluster&pandid=${onbekend.join(',')}`);
+          if (res.ok) {
+            const { clusters = {} } = await res.json();
+            onbekend.forEach(id => vveClusterCache.set(id, clusters[id] || [id]));
+          }
+        } catch (err) {
+          console.warn('VvE-clusterindex ophalen mislukt - VvE-detectie valt terug op alleen de opgegeven panden:', err);
+        }
+      }
+
+      const uitgebreid = new Set();
+      pandIds.forEach(pid => {
+        uitgebreid.add(pid);
+        (vveClusterCache.get(pid) || []).forEach(sibling => uitgebreid.add(sibling));
+      });
+      return [...uitgebreid];
+    }
+
+    // Voor een VvE die uit meerdere panden bestaat: haalt per (al bekend) pand-ID de 3D BAG-data
+    // op en combineert alles tot één weergave. RD-coördinaten zijn absoluut, dus vlakken van
+    // verschillende panden kunnen zonder herpositioneren worden samengevoegd - de 3D-viewer
+    // centreert vanzelf om de gezamenlijke bounding box van alle panden tezamen.
+    async function fetchDakDataVoorPanden(pandIdsInvoer) {
+      const card = document.getElementById('dak-card');
+      const container = document.getElementById('dak-data');
+      card.style.display = 'block';
+      card.dataset.hasContent = 'true';
+      container.innerHTML = `<span class="data-loading"><span class="spinner-sm"></span> Dakoppervlak van ${pandIdsInvoer.length} pand${pandIdsInvoer.length === 1 ? '' : 'en'} ophalen...</span>`;
+
+      try {
+        const pandIds = await expandeerVveCluster(pandIdsInvoer.filter(Boolean));
+        const uniekePandIds = [...new Set(pandIds)];
+        if (!uniekePandIds.length) throw new Error('Geen pand-ID\'s opgegeven');
+        if (uniekePandIds.length > pandIdsInvoer.length) {
+          container.innerHTML = `<span class="data-loading"><span class="spinner-sm"></span> Dakoppervlak van ${uniekePandIds.length} panden (VvE-cluster) ophalen...</span>`;
+        }
+
+        const resultaten = await Promise.all(uniekePandIds.map(pid =>
+          fetchDakAttrsEnVlakken(pid).catch(err => { console.warn(`Pand ${pid} overgeslagen:`, err); return null; })
+        ));
+        const geldig = resultaten.filter(Boolean);
+        if (!geldig.length) throw new Error('Geen 3D BAG-data gevonden voor deze panden');
+
+        currentBuildingFaces = geldig.flatMap(r => r.faces);
+        currentDakDelen = currentBuildingFaces.filter(v => v.type === 'RoofSurface').sort((a, b) => b.oppervlak - a.oppervlak);
+        currentDakData = geldig.length > 1 ? aggregeerPandAttributen(geldig.map(r => r.attrs)) : geldig[0].attrs;
+        renderDakData(currentDakData, currentDakDelen, null, geldig.length > 1 ? geldig.length : undefined);
+        fetchDakVergelijking2D(uniekePandIds);
+      } catch (err) {
+        console.warn('3D BAG-data voor panden ophalen mislukt:', err);
+        container.innerHTML = '<p style="color:#888;font-size:0.85rem;">Dakoppervlak niet beschikbaar voor deze panden.</p>';
+      }
+    }
+
+    // Voor bagid's (adresseerbaarobject_id's): eerst per bagid het bijbehorende pand opzoeken,
+    // dan hetzelfde als fetchDakDataVoorPanden.
+    async function fetchDakDataMeerdereBagids(bagids) {
+      const pandIds = await Promise.all(bagids.map(resolvePandIdentificatieVoorBagid));
+      await fetchDakDataVoorPanden(pandIds);
+    }
+
+    // Vindt een willekeurig adres (adresseerbaarobject_id) binnen een pand, om de "Uw woning"-
+    // kaart te vullen wanneer we alleen een pand-ID hebben (en geen specifiek adres).
+    async function resolveEersteAdresVoorPand(pandId) {
+      try {
+        const res = await fetch(`${BAG_API}/collections/pand/items?identificatie=${pandId}&limit=1`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        const vboHref = data.features?.[0]?.properties?.['verblijfsobject.href']?.[0];
+        if (!vboHref) return null;
+
+        const vboRes = await fetch(vboHref, { headers: { 'Accept': 'application/json' } });
+        if (!vboRes.ok) return null;
+        const vboFeature = await vboRes.json();
+        return (vboFeature.properties || vboFeature).identificatie || null;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    // Oppervlak van een (mogelijk hellend) 3D-vlak via Newell's methode: werkt voor elk plat
+    // vlak in de ruimte, ongeacht oriëntatie - nodig omdat dakvlakken zelden horizontaal zijn.
+    function polygonArea3D(points) {
+      let nx = 0, ny = 0, nz = 0;
+      const n = points.length;
+      for (let i = 0; i < n; i++) {
+        const [x1, y1, z1] = points[i];
+        const [x2, y2, z2] = points[(i + 1) % n];
+        nx += (y1 - y2) * (z1 + z2);
+        ny += (z1 - z2) * (x1 + x2);
+        nz += (x1 - x2) * (y1 + y2);
+      }
+      return Math.sqrt(nx * nx + ny * ny + nz * nz) / 2;
+    }
+
+    // Grootste loodrechte afstand van een hoekpunt tot het best passende vlak door alle punten
+    // (Newell-normaal + zwaartepunt). Bij een écht plat vlak is dit ~0; een waarde van een paar
+    // decimeter betekent dat de hoekpunten niet in één vlak liggen - vaak een reconstructiefout
+    // van 3D BAG bij een kleine/complexe vorm (dakkapel, uitbouw) met te weinig AHN-meetpunten.
+    function planariteitAfwijking(punten) {
+      let nx = 0, ny = 0, nz = 0;
+      const n = punten.length;
+      for (let i = 0; i < n; i++) {
+        const [x1, y1, z1] = punten[i];
+        const [x2, y2, z2] = punten[(i + 1) % n];
+        nx += (y1 - y2) * (z1 + z2);
+        ny += (z1 - z2) * (x1 + x2);
+        nz += (x1 - x2) * (y1 + y2);
+      }
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (len < 1e-9) return 0;
+      nx /= len; ny /= len; nz /= len;
+
+      const cx = punten.reduce((s, p) => s + p[0], 0) / n;
+      const cy = punten.reduce((s, p) => s + p[1], 0) / n;
+      const cz = punten.reduce((s, p) => s + p[2], 0) / n;
+
+      return punten.reduce((max, [x, y, z]) => {
+        const afstand = Math.abs((x - cx) * nx + (y - cy) * ny + (z - cz) * nz);
+        return Math.max(max, afstand);
+      }, 0);
+    }
+
+    const PLANARITEIT_GRENS = 0.12; // meter - AHN heeft ~5cm ruis, dus >12cm wijst op een echte vouw
+
+    // Haalt alle vlakken (grond, wand, dak) van het pand op uit de LOD2.2-geometrie, met
+    // echte RD-coordinaten. Basis voor zowel de dakdelen-tabel/plattegrond (alleen dak) als
+    // het 3D-model (alle vlakken).
+    function computeBuildingFaces(data) {
+      try {
+        const objectId = data._objectId;
+        const cityObjects = data.feature?.CityObjects || {};
+        const pand = cityObjects[objectId];
+        const transform = data.metadata?.transform;
+        const vertices = data.feature?.vertices;
+        if (!pand?.children?.length || !transform || !vertices) return [];
+
+        const [sx, sy, sz] = transform.scale;
+        const [tx, ty, tz] = transform.translate;
+        const toReal = (vi) => {
+          const [x, y, z] = vertices[vi];
+          return [x * sx + tx, y * sy + ty, z * sz + tz];
+        };
+
+        const alleVlakken = [];
+        pand.children.forEach((childId) => {
+          const child = cityObjects[childId];
+          const geom = child?.geometry?.find(g => g.lod === '2.2');
+          const semantics = geom?.semantics;
+          if (!geom || !semantics) return;
+
+          const faces = geom.boundaries[0];
+          const semIdx = semantics.values[0];
+
+          faces.forEach((face, i) => {
+            const sem = semantics.surfaces[semIdx[i]];
+            if (!sem?.type) return;
+
+            const ring = face[0].map(toReal);
+            const area = polygonArea3D(ring);
+            if (area < 1) return; // ruis: verwaarloosbare restvlakjes negeren
+
+            alleVlakken.push({
+              type: sem.type,
+              oppervlak: area,
+              hellingshoek: sem.b3_hellingshoek,
+              azimut: sem.b3_azimut,
+              punten: ring,
+              vlak2D: ring.map(([x, y]) => [x, y]),
+              planariteit: planariteitAfwijking(ring),
+            });
+          });
+        });
+
+        return alleVlakken;
+      } catch (err) {
+        console.warn('Pandgeometrie berekenen mislukt:', err);
+        return [];
+      }
+    }
+
+    // Berekent oppervlak, hellingshoek en oriëntatie per dakvlak. De 3D BAG pand-attributen
+    // geven alleen het totaal (plat/schuin) per pand, niet per dakvlak.
+    function computeRoofSurfaces(data) {
+      return computeBuildingFaces(data)
+        .filter(v => v.type === 'RoofSurface')
+        .sort((a, b) => b.oppervlak - a.oppervlak);
+    }
+
+    function azimutNaarWindrichting(azimut) {
+      const richtingen = ['N', 'NO', 'O', 'ZO', 'Z', 'ZW', 'W', 'NW'];
+      const idx = Math.round(azimut / 45) % 8;
+      return richtingen[idx];
+    }
+
+    function renderDakData(attrs, dakdelen, aantalVerblijfsobjecten, aantalPanden) {
+      const container = document.getElementById('dak-data');
+
+      // Bij een pand met meerdere adressen/verblijfsobjecten (bijv. een twee-onder-één-kap of
+      // rijtjeswoningen die als één pand geregistreerd staan) is er maar één 3D BAG-model voor
+      // het hele pand - dat bevat dus ook het dak/de muren van de buren, niet alleen dit adres.
+      // Bij een VvE die uit meerdere panden bestaat (aantalPanden), is dit juist gewenst: dan
+      // tonen we de opgetelde/samengevoegde weergave van al die panden.
+      let waarschuwing = '';
+      if (aantalPanden > 1) {
+        waarschuwing = `<p style="font-size:0.78rem;color:var(--status-neutral-fg);background:var(--status-neutral-bg);border:1px solid var(--status-neutral-border);border-radius:4px;padding:0.5rem 0.65rem;margin-bottom:0.75rem;">`
+          + `Samengevoegde weergave van ${aantalPanden} panden (VvE). Cijfers en 3D-model zijn de som/combinatie van al die panden.</p>`;
+      } else if (aantalVerblijfsobjecten > 1) {
+        waarschuwing = `<p style="font-size:0.78rem;color:var(--status-warn-fg);background:var(--status-warn-bg);border:1px solid var(--status-warn-border);border-radius:4px;padding:0.5rem 0.65rem;margin-bottom:0.75rem;">`
+          + `Let op: dit pand bevat ${aantalVerblijfsobjecten} adressen. De cijfers en het 3D-model hieronder zijn van het hele pand, dus mogelijk inclusief dak/muren van de buren.</p>`;
+      }
+
+      // De pand-brede attributen (b3_opp_dak_plat/schuin) volgen de globale daktype-classificatie
+      // van het hele pand (b3_dak_type) - bij een pand dat als geheel "slanted" is telt 3D BAG
+      // ook kleine platte deelvlakken mee als "schuin". Dat botst zichtbaar met de dakdelen
+      // hieronder, die per vlak op de werkelijke hellingshoek zijn ingedeeld. Om de samenvatting
+      // en de dakdelen consistent te houden, tellen we de totalen daarom liever zelf op uit
+      // dakdelen (dezelfde drempel als hieronder) en vallen alleen terug op de pandattributen
+      // als de geometrieberekening niets opleverde.
+      let plat, schuin, daktype;
+      if (dakdelen?.length) {
+        plat = dakdelen.filter(d => d.hellingshoek < PLAT_DAK_HELLING_GRENS).reduce((s, d) => s + d.oppervlak, 0);
+        schuin = dakdelen.filter(d => d.hellingshoek >= PLAT_DAK_HELLING_GRENS).reduce((s, d) => s + d.oppervlak, 0);
+        daktype = plat > 0 && schuin > 0 ? 'Gemengd (plat + schuin)' : schuin > 0 ? 'Schuin dak' : 'Plat dak';
+      } else {
+        plat = attrs.b3_opp_dak_plat || 0;
+        schuin = attrs.b3_opp_dak_schuin || 0;
+        const daktypeLabels = { slanted: 'Schuin dak', horizontal: 'Plat dak', multiple: 'Gemengd (plat + schuin)' };
+        daktype = daktypeLabels[attrs.b3_dak_type] || attrs.b3_dak_type || null;
+      }
+      const totaal = plat + schuin;
+
+      // Inhoud (m3) staat al kant-en-klaar in 3D BAG; LOD2.2 is de meest gedetailleerde
+      // (op de daadwerkelijke dakvorm gebaseerde) variant, met LOD1.3/1.2 als terugval.
+      const inhoud = attrs.b3_volume_lod22 ?? attrs.b3_volume_lod13 ?? attrs.b3_volume_lod12;
+
+      const dakItems = [];
+      dakItems.push(['Totaal dakoppervlak', `${totaal.toLocaleString('nl-NL', { maximumFractionDigits: 1 })} m&sup2;`]);
+      if (plat) dakItems.push(['Waarvan plat', `${plat.toLocaleString('nl-NL', { maximumFractionDigits: 1 })} m&sup2;`]);
+      if (schuin) dakItems.push(['Waarvan schuin', `${schuin.toLocaleString('nl-NL', { maximumFractionDigits: 1 })} m&sup2;`]);
+      if (daktype) dakItems.push(['Daktype', daktype]);
+      if (inhoud != null) dakItems.push(['Inhoud', `${inhoud.toLocaleString('nl-NL', { maximumFractionDigits: 0 })} m&sup3;`]);
+
+      // Overige pandafmetingen.
+      const fmt = (n, d = 1) => n?.toLocaleString('nl-NL', { maximumFractionDigits: d });
+      const afmetingen = [];
+      if (attrs.b3_bouwlagen != null) afmetingen.push(['Bouwlagen', attrs.b3_bouwlagen]);
+      // 3D BAG-hoogtes zijn in meters +NAP (zelfde referentie als AHN, waar de data uit voortkomt).
+      if (attrs.b3_h_maaiveld != null) afmetingen.push(['Maaiveldhoogte', `${fmt(attrs.b3_h_maaiveld, 2)} m NAP`]);
+      if (attrs.b3_h_dak_min != null && attrs.b3_h_dak_max != null) {
+        afmetingen.push(['Hoogte (dak)', `${fmt(attrs.b3_h_dak_min)} &ndash; ${fmt(attrs.b3_h_dak_max)} m NAP`]);
+      }
+      if (attrs.b3_opp_grond != null) afmetingen.push(['Grondoppervlak', `${fmt(attrs.b3_opp_grond)} m&sup2;`]);
+      if (attrs.b3_opp_buitenmuur != null) afmetingen.push(['Buitenmuuroppervlak', `${fmt(attrs.b3_opp_buitenmuur)} m&sup2;`]);
+      if (attrs.b3_opp_scheidingsmuur) afmetingen.push(['Gedeelde muren (buren)', `${fmt(attrs.b3_opp_scheidingsmuur)} m&sup2;`]);
+
+      // Vaste 2-koloms indeling: alle dakinfo links, alle overige afmetingen rechts (i.p.v. de
+      // zelf-balancerende .data-grid, die de twee groepen door elkaar over de kolommen verdeelde).
+      const renderKvRows = (items) => items.map(([label, value]) =>
+        `<div class="data-item"><div class="label">${label}</div><div class="value">${value}</div></div>`
+      ).join('');
+
+      let html = '<div class="fixed-two-col">';
+      html += `<div><p class="col-heading">Dakoppervlak</p>${renderKvRows(dakItems)}</div>`;
+      html += afmetingen.length
+        ? `<div><p class="col-heading">Afmetingen</p>${renderKvRows(afmetingen)}</div>`
+        : '<div></div>';
+      html += '</div>';
+      html += '<div id="dak-2d-vergelijking"></div>';
+
+      if (dakdelen?.length) {
+        let heeftTwijfelgeval = false;
+        let heeftVouw = false;
+        let tabel = '<table class="compact-table">';
+        dakdelen.forEach((d, i) => {
+          const isPlat = d.hellingshoek < PLAT_DAK_HELLING_GRENS;
+          const twijfel = isTwijfelgeval(d.hellingshoek);
+          if (twijfel) heeftTwijfelgeval = true;
+          const nietVlak = d.planariteit > PLANARITEIT_GRENS;
+          if (nietVlak) heeftVouw = true;
+          const richting = isPlat ? 'Plat' : `${azimutNaarWindrichting(d.azimut)} (${Math.round(d.azimut)}°)`;
+          const label = dakdelen.length > 1 ? `Dakvlak ${i + 1}` : 'Dakvlak';
+          const dakIconStyle = 'cursor:help;display:inline-flex;vertical-align:middle;width:0.85em;height:0.85em;color:var(--status-warn-fg);';
+          const twijfelIcon = twijfel
+            ? ` <span title="Twijfelgeval: bij ${Math.round(d.hellingshoek)}° is dit even goed een plat dak met zonnepanelen op een opstelsysteem als een licht hellend dak." style="${dakIconStyle}">${ICONS.alertTriangle}</span>`
+            : '';
+          const vouwIcon = nietVlak
+            ? ` <span title="Geometrie van dit dakvlak is niet vlak (~${Math.round(d.planariteit * 100)} cm afwijking) - waarschijnlijk een reconstructiefout, vaak bij een kleine/complexe vorm zoals een dakkapel." style="${dakIconStyle}">${ICONS.alertTriangle}</span>`
+            : '';
+          tabel += `<tr><td>${label}</td><td>${d.oppervlak.toLocaleString('nl-NL', { maximumFractionDigits: 1 })} m&sup2;`
+            + ` <span style="color:#888;font-size:0.8rem;">&middot; ${richting}${isPlat ? '' : `, helling ${Math.round(d.hellingshoek)}°`}</span>${twijfelIcon}${vouwIcon}</td></tr>`;
+        });
+        tabel += '</table>';
+
+        // Bij veel dakvlakken (VvE met meerdere panden, of één pand met veel verblijfsobjecten
+        // zoals een appartementencomplex) wordt de lijst al snel lang en onoverzichtelijk - dan
+        // standaard ingeklapt tonen achter een <details>/<summary>.
+        const isLangeDakdelenLijst = dakdelen.length > 6;
+        if (isLangeDakdelenLijst) {
+          html += `<details style="margin:0.85rem 0 0.4rem;"><summary style="cursor:pointer;font-size:0.8rem;font-weight:600;color:#263640;">Dakdelen (${dakdelen.length})</summary><div style="margin-top:0.5rem;">${tabel}</div></details>`;
+        } else {
+          html += '<p style="font-size:0.8rem;font-weight:600;color:#263640;margin:0.85rem 0 0.4rem;">Dakdelen</p>' + tabel;
+        }
+
+        const dakNoteStyle = 'display:flex;align-items:flex-start;gap:0.4rem;font-size:0.75rem;color:var(--status-warn-fg);margin-top:0.4rem;';
+        const dakNoteIconStyle = 'flex-shrink:0;width:0.9em;height:0.9em;margin-top:0.15em;';
+        if (heeftTwijfelgeval) {
+          html += `<p style="${dakNoteStyle}"><span style="${dakNoteIconStyle}">${ICONS.alertTriangle}</span><span>Dakvlak(ken) tussen ${TWIJFEL_MIN}&deg; en ${TWIJFEL_MAX}&deg;: dat kan zowel een licht hellend dak zijn als een plat dak met zonnepanelen op een opstelsysteem &mdash; op hellingshoek alleen is dat niet betrouwbaar te onderscheiden.</span></p>`;
+        }
+        if (heeftVouw) {
+          html += `<p style="${dakNoteStyle}"><span style="${dakNoteIconStyle}">${ICONS.alertTriangle}</span><span>Dakvlak(ken) met een vouw: de hoekpunten liggen niet echt in één plat vlak, vaak bij een kleine/complexe vorm (dakkapel) met te weinig AHN-meetpunten. Oppervlak/hoek van dat vlak is dan minder betrouwbaar.</span></p>`;
+        }
+      }
+
+      if (currentBuildingFaces?.length) {
+        html += `<button type="button" class="cta-btn" onclick="toggleDakViewer()" id="dak-viewer-toggle" style="margin-top:0.85rem;">${ICONS.cube} Bekijk 3D-model</button>`;
+        html += '<div id="dak-viewer-container" style="display:none;margin-top:0.75rem;height:clamp(340px, 60vh, 560px);border:1px solid #e0e0e0;border-radius:4px;overflow:hidden;position:relative;background:#f5f8f9;"></div>';
+      }
+
+      html += '<div style="margin-top:0.6rem;font-size:0.75rem;color:#aaa;">Bron: 3D BAG (3dbag.nl) &mdash; berekend uit hoogtemetingen (AHN), indicatief.</div>';
+
+      container.innerHTML = waarschuwing + html;
+      // Vult #dak-2d-vergelijking meteen als de 2D-data al binnen is (bijv. van een vorige render
+      // van dit pand); anders vult fetchDakVergelijking2D het zelf zodra die klaar is.
+      renderDak2DVergelijking();
+
+      // Standaard direct open (i.p.v. pas na een klik) - toggleDakViewer detecteert zelf de
+      // huidige (dichte) staat en initialiseert de Three.js scene.
+      if (currentBuildingFaces?.length) toggleDakViewer();
+
+      // Inhoud/bouwlagen/grondoppervlak uit deze 3D BAG-data horen ook bij "Oppervlakten en
+      // inhoud" in de kenmerkenblokken bovenaan - die opnieuw tekenen zodra dit bekend is.
+      if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+    }
+
+    // Vult #dak-2d-vergelijking (een leeg placeholder-divje in renderDakData's html) met de 2D-
+    // dakoppervlakte uit kaart.haarlem.nl, zodra fetchDakVergelijking2D die heeft opgehaald. Los
+    // van renderDakData gehouden i.p.v. daarin verweven, omdat de 2D-fetch en de 3D-render in een
+    // andere volgorde kunnen afronden (en dit stukje dan zonder een volledige dak-kaart-herbouw
+    // alsnog verschijnt/verdwijnt zodra het zover is).
+    function renderDak2DVergelijking() {
+      const el = document.getElementById('dak-2d-vergelijking');
+      if (!el) return;
+      if (!currentDak2D) { el.innerHTML = ''; return; }
+
+      const fmt = (n) => n.toLocaleString('nl-NL', { maximumFractionDigits: 1 });
+      const totaal3D = (currentDakDelen || []).reduce((s, d) => s + d.oppervlak, 0);
+
+      let duiding = '';
+      if (totaal3D > 0 && currentDak2D.totaal > 0) {
+        const verschilPct = Math.round(((totaal3D - currentDak2D.totaal) / currentDak2D.totaal) * 100);
+        if (verschilPct >= 2) {
+          duiding = ` &mdash; 3D-model is ${verschilPct}% groter (door de dakhelling mee te rekenen)`;
+        } else if (verschilPct <= -2) {
+          duiding = ` &mdash; 3D-model is ${Math.abs(verschilPct)}% kleiner`;
+        }
+      }
+
+      el.innerHTML = `<p style="font-size:0.78rem;color:#607070;background:#f6faf9;border:1px solid #e0ece9;border-radius:4px;padding:0.5rem 0.65rem;margin-top:0.6rem;">`
+        + `<strong>Ter vergelijking:</strong> ${fmt(currentDak2D.totaal)} m&sup2; volgens de 2D-dakoppervlaktekaart van kaart.haarlem.nl (zonnekansenkaart)${duiding}.</p>`;
+    }
+
+    // Wordt automatisch bij het laden geopend (zie renderDakData); kan ook nog met de knop.
+    function toggleDakViewer() {
+      const el = document.getElementById('dak-viewer-container');
+      const btn = document.getElementById('dak-viewer-toggle');
+      if (!el) return;
+
+      const opening = el.style.display === 'none';
+      el.style.display = opening ? 'block' : 'none';
+      if (btn) btn.innerHTML = `${ICONS.cube} ${opening ? 'Verberg 3D-model' : 'Bekijk 3D-model'}`;
+
+      if (opening && window.initDakViewer) {
+        window.initDakViewer(el, currentBuildingFaces);
+      }
+    }
+
+    // --- VvE: overige adressen in dit pand + energielabels ---
+    async function fetchEnergieInfoForBagid(bagid) {
+      if (!bagid) return { label: null, gebouwsubtype: null, gebouwtype: null };
+      try {
+        const res = await fetch(`${EP_PROXY_URL}?bagid=${encodeURIComponent(bagid)}`);
+        if (!res.ok) return { label: null, gebouwsubtype: null, gebouwtype: null };
+        const data = await res.json();
+        if (data._httpStatus && data._httpStatus >= 400) return { label: null, gebouwsubtype: null, gebouwtype: null };
+        const rec = data['0'] || data;
+        return {
+          label: rec.LabelLetter || rec.labelLetter || rec.Energieklasse || rec.energieklasse || null,
+          gebouwsubtype: rec.Gebouwsubtype || rec.gebouwsubtype || null,
+          gebouwtype: rec.Gebouwtype || rec.gebouwtype || null,
+        };
+      } catch (err) {
+        return { label: null, gebouwsubtype: null, gebouwtype: null };
+      }
+    }
+
+    function energielabelBadgeHtml(label) {
+      if (!label) return '<span style="color:#999;font-size:0.85rem;">Geen label</span>';
+      const colors = {'A+++++':'#009036','A++++':'#009036','A+++':'#009036','A++':'#009036','A+':'#009036','A':'#009036','B':'#55ab26','C':'#c8d100','D':'#fff200','E':'#f7a600','F':'#ed7d00','G':'#e30613'};
+      const textColors = {'C':'#333','D':'#333'};
+      const bg = colors[label] || '#999';
+      const fg = textColors[label] || '#fff';
+      return `<span style="display:inline-block;background:${bg};color:${fg};padding:0.15rem 0.5rem;border-radius:3px;font-weight:700;font-size:0.85rem;">${label}</span>`;
+    }
+
+    // EP-Online geeft de positie van een appartement in het gebouw mee via "Gebouwsubtype",
+    // opgebouwd uit een horizontale ligging (tussen/hoek) + verdieping (dak/midden/vloer).
+    function liggingInfo(gebouwsubtype) {
+      if (!gebouwsubtype) return { vertRank: 0, vertLabel: null, horiz: null, raw: null };
+      const s = gebouwsubtype.toLowerCase();
+      const horiz = s.includes('hoek') ? 'hoek' : s.includes('tussen') ? 'tussen' : null;
+      let vertRank = 0, vertLabel = null;
+      if (s.includes('dak')) { vertRank = 3; vertLabel = 'Bovenste verdieping (dak)'; }
+      else if (s.includes('boven')) { vertRank = 3; vertLabel = 'Bovenverdieping'; }
+      else if (s.includes('midden')) { vertRank = 2; vertLabel = 'Middelste verdieping'; }
+      else if (s.includes('vloer') || s.includes('beneden') || s.includes('begane')) { vertRank = 1; vertLabel = 'Begane grond'; }
+      return { vertRank, vertLabel, horiz, raw: gebouwsubtype };
+    }
+
+    // Adressen zonder EP-Online liggingsgegevens: afleiden uit de positie van het
+    // huisnummer/toevoeging binnen hetzelfde trappenhuis (huisnummer + huisletter),
+    // t.o.v. buren waarvan de verdieping wel bekend is.
+    function inferLigging(units) {
+      const groups = {};
+      units.forEach(u => {
+        const key = `${u.vbo.huisnummer ?? ''}${u.vbo.huisletter ?? ''}`;
+        (groups[key] = groups[key] || []).push(u);
+      });
+
+      Object.values(groups).forEach(group => {
+        group.sort((a, b) => {
+          const ta = parseInt(a.vbo.toevoeging) || 0;
+          const tb = parseInt(b.vbo.toevoeging) || 0;
+          return ta - tb;
+        });
+
+        const knownIdx = group.map((u, i) => (u.ligging.vertRank > 0 ? i : -1)).filter(i => i >= 0);
+        if (!knownIdx.length) return; // geen enkel anker in dit trappenhuis
+
+        group.forEach((u, i) => {
+          if (u.ligging.vertRank > 0) return;
+          let nearest = knownIdx[0];
+          knownIdx.forEach(j => { if (Math.abs(j - i) < Math.abs(nearest - i)) nearest = j; });
+          const bron = group[nearest];
+          u.ligging = { vertRank: bron.ligging.vertRank, vertLabel: bron.ligging.vertLabel, horiz: bron.ligging.horiz, raw: null, inferred: true };
+        });
+      });
+    }
+
+    function unitExtraInfoHtml(unit) {
+      const parts = [];
+      if (unit.oppervlakte != null) parts.push(`${unit.oppervlakte} m&sup2;`);
+      if (unit.woz != null) parts.push(`&euro; ${unit.woz.toLocaleString('nl-NL')}`);
+      if (!parts.length) return '';
+      return `<div style="font-size:0.75rem;color:#6f7071;margin-top:0.15rem;">${parts.join(' &middot; ')}</div>`;
+    }
+
+    function unitChipHtml(unit, currentObjectId) {
+      const { vbo, label, ligging } = unit;
+      const adresStr = formatHuisnummerFromProps(vbo);
+      const isCurrent = currentObjectId && vbo.identificatie === currentObjectId;
+      const hoekClass = ligging.horiz === 'hoek' ? ' pand-unit-hoek' : '';
+      const inferredClass = ligging.inferred ? ' pand-unit-inferred' : '';
+      const clickableClass = !isCurrent && vbo.identificatie ? ' pand-unit-clickable' : '';
+      const bagidAttr = !isCurrent && vbo.identificatie ? ` data-bagid="${vbo.identificatie}"` : '';
+      const title = ligging.raw
+        ? ` title="Ligging volgens EP-Online: ${ligging.raw}"`
+        : ligging.inferred
+          ? ` title="Verdieping niet bekend bij EP-Online; afgeleid van naastgelegen adres in hetzelfde trappenhuis (${ligging.vertLabel})"`
+          : '';
+      const adresLabel = ligging.inferred ? `${adresStr} <span class="pand-unit-inferred-mark">~</span>` : adresStr;
+      return `<div class="pand-unit${hoekClass}${inferredClass}${clickableClass}"${title}${bagidAttr}>
+        <div class="pand-unit-adres">${adresLabel}${isCurrent ? ' <span class="pand-unit-current">(dit adres)</span>' : ''}</div>
+        <div>${energielabelBadgeHtml(label)}</div>
+        ${unitExtraInfoHtml(unit)}
+      </div>`;
+    }
+
+    // Grondgebonden woning (1 adres per pand): geen verdieping/ligging te tonen, alleen adres + label.
+    function simpleUnitChipHtml(unit, currentObjectId) {
+      const { vbo, label } = unit;
+      const adresStr = formatHuisnummerFromProps(vbo);
+      const isCurrent = currentObjectId && vbo.identificatie === currentObjectId;
+      const clickableClass = !isCurrent && vbo.identificatie ? ' pand-unit-clickable' : '';
+      const bagidAttr = !isCurrent && vbo.identificatie ? ` data-bagid="${vbo.identificatie}"` : '';
+      return `<div class="pand-unit${clickableClass}"${bagidAttr}>
+        <div class="pand-unit-adres">${adresStr}${isCurrent ? ' <span class="pand-unit-current">(dit adres)</span>' : ''}</div>
+        <div>${energielabelBadgeHtml(label)}</div>
+        ${unitExtraInfoHtml(unit)}
+      </div>`;
+    }
+
+    // Bouwt het verdiepingen-schema (of een platte rij als er geen liggingsgegevens zijn)
+    // voor een set adressen die tot hetzelfde pand behoren.
+    function renderPandSchemaHtml(units, currentObjectId) {
+      units.sort((a, b) => {
+        const hnA = a.vbo.huisnummer ?? 0, hnB = b.vbo.huisnummer ?? 0;
+        if (hnA !== hnB) return hnA - hnB;
+        return `${a.vbo.huisletter || ''}${a.vbo.toevoeging || ''}`.localeCompare(`${b.vbo.huisletter || ''}${b.vbo.toevoeging || ''}`);
+      });
+      inferLigging(units);
+
+      const hasLigging = units.some(u => u.ligging.vertRank > 0);
+      let html = '';
+
+      if (hasLigging) {
+        const bands = [3, 2, 1];
+        const bandUnits = { 3: [], 2: [], 1: [] };
+        const onbekend = [];
+        units.forEach(u => { if (u.ligging.vertRank > 0) bandUnits[u.ligging.vertRank].push(u); else onbekend.push(u); });
+
+        html += '<div class="pand-schema">';
+        bands.forEach(rank => {
+          if (!bandUnits[rank].length) return;
+          const label = bandUnits[rank][0].ligging.vertLabel;
+          html += `<div class="pand-verdieping">
+            <div class="pand-verdieping-label">${label}</div>
+            <div class="pand-verdieping-units">${bandUnits[rank].map(u => unitChipHtml(u, currentObjectId)).join('')}</div>
+          </div>`;
+        });
+        html += '</div>';
+
+        if (onbekend.length) {
+          html += `<p style="font-size:0.75rem;color:#aaa;margin:0.75rem 0 0.35rem;">Verdieping onbekend (geen enkel adres in hetzelfde trappenhuis heeft liggingsgegevens):</p>`;
+          html += `<div class="pand-verdieping-units">${onbekend.map(u => unitChipHtml(u, currentObjectId)).join('')}</div>`;
+        }
+      } else {
+        html += `<div class="pand-verdieping-units">${units.map(u => unitChipHtml(u, currentObjectId)).join('')}</div>`;
+      }
+
+      return html;
+    }
+
+    // Adressen (met dit pand) ophalen + energielabels, en het schema tekenen.
+    async function renderVveData(hrefs, currentObjectId, contextLabel, zeker) {
+      const target = document.getElementById('vve-pand-schema');
+
+      target.innerHTML = `<div class="data-loading"><span class="spinner-sm"></span> ${hrefs.length} adressen ophalen...</div>`;
+
+      try {
+        const vbos = (await Promise.all(hrefs.map(async (href) => {
+          try {
+            const res = await fetch(href, { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) return null;
+            const feature = await res.json();
+            return feature.properties || feature;
+          } catch (err) {
+            return null;
+          }
+        }))).filter(Boolean);
+
+        const energieInfo = await Promise.all(vbos.map(v => fetchEnergieInfoForBagid(v.identificatie)));
+
+        const units = vbos.map((vbo, i) => ({
+          vbo,
+          label: energieInfo[i].label,
+          ligging: liggingInfo(energieInfo[i].gebouwsubtype),
+        }));
+
+        // Voorgestelde huisnummerbereik verbreden op basis van dit pand, als de
+        // gebruiker het bereik nog niet zelf heeft aangepast.
+        const vanEl = document.getElementById('vve-range-van');
+        const totEl = document.getElementById('vve-range-tot');
+        const nrs = units.map(u => u.vbo.huisnummer).filter(n => n != null);
+        if (vanEl?.dataset.auto === 'true' && nrs.length) {
+          vanEl.value = Math.max(1, Math.min(...nrs) - 4);
+          totEl.value = Math.max(...nrs) + 4;
+        }
+
+        // Als dit pand uitsluitend even of uitsluitend oneven huisnummers heeft, is dat
+        // vermoedelijk ook de kant van de straat waar het hele blok ligt.
+        const evenEl = document.getElementById('vve-range-even');
+        const onevenEl = document.getElementById('vve-range-oneven');
+        if (evenEl?.dataset.auto === 'true' && onevenEl?.dataset.auto === 'true' && nrs.length) {
+          const allEven = nrs.every(n => n % 2 === 0);
+          const allOdd = nrs.every(n => n % 2 === 1);
+          if (allEven || allOdd) {
+            evenEl.checked = allEven;
+            onevenEl.checked = allOdd;
+          }
+        }
+
+        // "(mogelijk een VvE)" alleen tonen bij de heuristiek (meerdere verblijfsobjecten in één
+        // pand, kán een VvE zijn maar hoeft niet) - bij de VvE-clusterindex weten we het zeker.
+        const hedge = zeker ? '' : ' (mogelijk een VvE)';
+        let html = `<p style="font-size:0.85rem;color:#6f7071;margin-bottom:0.75rem;">${contextLabel || 'Dit pand'} telt ${hrefs.length} adressen${hedge}.</p>`;
+        html += renderPandSchemaHtml(units, currentObjectId);
+        target.innerHTML = html;
+      } catch (err) {
+        console.warn('VvE data ophalen mislukt:', err);
+        target.innerHTML = '<p style="color:#888;">Kon adressen in dit pand niet ophalen.</p>';
+      }
+    }
+
+    // Verzamelt de verblijfsobject-hrefs van meerdere panden tegelijk (VvE-cluster), zodat
+    // renderVveData daar net zo'n gecombineerde adressenlijst van kan opbouwen als voor één pand.
+    async function fetchVerblijfsobjectHrefsVoorPanden(pandIds) {
+      const panden = await Promise.all(pandIds.map(async (pid) => {
+        try {
+          const res = await fetch(`${BAG_API}/collections/pand/items?identificatie=${pid}&limit=1`);
+          if (!res.ok) return null;
+          const data = await res.json();
+          return data.features?.[0]?.properties || null;
+        } catch (err) {
+          return null;
+        }
+      }));
+      return panden.filter(Boolean).flatMap(p => p['verblijfsobject.href'] || []);
+    }
+
+    async function setupVveSection(pand, currentObjectId) {
+      document.getElementById('vve-card').style.display = 'block';
+      document.getElementById('vve-card').dataset.hasContent = 'true';
+      document.getElementById('vve-range-results').innerHTML = '';
+
+      const vanEl = document.getElementById('vve-range-van');
+      const totEl = document.getElementById('vve-range-tot');
+      const hn = currentAdres?.huisnummer;
+      if (hn) {
+        vanEl.value = Math.max(1, hn - 6);
+        totEl.value = hn + 6;
+        vanEl.dataset.auto = 'true';
+        totEl.dataset.auto = 'true';
+      }
+
+      // Naast de bestaande "meerdere verblijfsobjecten in dit ene pand"-situatie (bijv. een
+      // appartementengebouw) ook checken of dit pand volgens de VvE-clusterindex bij andere,
+      // losse panden hoort (bijv. een rijtje rijwoning-pandjes) - dan is dat de betrouwbaardere
+      // bron voor "welke adressen horen hierbij", i.p.v. alleen dit ene pand.
+      const cluster = await expandeerVveCluster([pand.identificatie]);
+      const isPandCluster = cluster.length > 1;
+      const isMultiVbo = pand.aantal_verblijfsobjecten > 1 && pand['verblijfsobject.href']?.length > 1;
+      const toonSchema = isPandCluster || isMultiVbo;
+      document.getElementById('vve-card-title-text').textContent = toonSchema ? 'Adressen in dit pand' : 'Vergelijkbare woningen';
+
+      const evenEl = document.getElementById('vve-range-even');
+      const onevenEl = document.getElementById('vve-range-oneven');
+      evenEl.dataset.auto = 'true';
+      onevenEl.dataset.auto = 'true';
+      if (toonSchema) {
+        // Voorlopig beide aan; renderVveData verfijnt dit op basis van de huisnummers in het pand/cluster.
+        evenEl.checked = true;
+        onevenEl.checked = true;
+      } else if (hn != null) {
+        // Grondgebonden woning: geen panddata om uit af te leiden, dus baseer de default op
+        // de pariteit van het ingevoerde huisnummer zelf.
+        evenEl.checked = hn % 2 === 0;
+        onevenEl.checked = hn % 2 !== 0;
+      } else {
+        evenEl.checked = true;
+        onevenEl.checked = true;
+      }
+
+      if (isPandCluster) {
+        const hrefs = await fetchVerblijfsobjectHrefsVoorPanden(cluster);
+        renderVveData(hrefs, currentObjectId, `Dit VvE-cluster van ${cluster.length} panden`, true);
+      } else if (isMultiVbo) {
+        renderVveData(pand['verblijfsobject.href'] || [], currentObjectId);
+      } else {
+        document.getElementById('vve-pand-schema').innerHTML = '';
+      }
+
+    }
+
+    // Adres -> pand-href opzoeken via de BAG, voor het groeperen van los gevonden adressen per pand.
+    async function fetchVboExtraForBagid(bagid) {
+      if (!bagid) return { pandHref: null, oppervlakte: null };
+      try {
+        const typeCode = bagid.substring(4, 6);
+        const objectTypes = { '01': 'verblijfsobject', '02': 'ligplaats', '03': 'standplaats' };
+        const objectType = objectTypes[typeCode] || 'verblijfsobject';
+        const res = await fetch(`${BAG_API}/collections/${objectType}/items?identificatie=${bagid}&limit=1`);
+        if (!res.ok) return { pandHref: null, oppervlakte: null };
+        const data = await res.json();
+        const props = data.features?.[0]?.properties;
+        return { pandHref: props?.['pand.href']?.[0] || null, oppervlakte: props?.oppervlakte ?? null };
+      } catch (err) {
+        return { pandHref: null, oppervlakte: null };
+      }
+    }
+
+    async function fetchWozWaardeForNummeraanduiding(nummeraanduidingId) {
+      if (!nummeraanduidingId) return null;
+      try {
+        const url = `https://api.kadaster.nl/lvwoz/wozwaardeloket-api/v1/wozwaarde/nummeraanduiding/${nummeraanduidingId}`;
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data.wozWaarden?.length) return null;
+        const waarden = data.wozWaarden.sort((a, b) => new Date(b.peildatum) - new Date(a.peildatum));
+        return waarden[0].vastgesteldeWaarde ?? null;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    // Handmatige zoekopdracht: alle adressen op dezelfde straat binnen het opgegeven
+    // huisnummerbereik, gegroepeerd per pand (VvE-panden als schema, losse panden als rij).
+    async function searchVveRange() {
+      const resultsEl = document.getElementById('vve-range-results');
+      const van = parseInt(document.getElementById('vve-range-van').value, 10);
+      const tot = parseInt(document.getElementById('vve-range-tot').value, 10);
+      const adres = currentAdres;
+
+      if (!adres?.straatnaam || !adres?.woonplaatsnaam) {
+        resultsEl.innerHTML = '<p style="color:#888;">Straatnaam van dit adres is onbekend.</p>';
+        return;
+      }
+      if (!van || !tot || van > tot) {
+        resultsEl.innerHTML = '<p style="color:#888;">Vul een geldig bereik in (van &le; tot).</p>';
+        return;
+      }
+
+      const wantEven = document.getElementById('vve-range-even').checked;
+      const wantOneven = document.getElementById('vve-range-oneven').checked;
+      if (!wantEven && !wantOneven) {
+        resultsEl.innerHTML = '<p style="color:#888;">Vink minstens &eacute;&eacute;n van even/oneven aan.</p>';
+        return;
+      }
+
+      resultsEl.innerHTML = `<div class="data-loading"><span class="spinner-sm"></span> Huisnummers ${van}&ndash;${tot} zoeken...</div>`;
+
+      try {
+        const straatFq = encodeURIComponent(`straatnaam:"${adres.straatnaam}"`);
+        const woonplaatsFq = encodeURIComponent(`woonplaatsnaam:${adres.woonplaatsnaam}`);
+        const huisnrFq = encodeURIComponent(`huisnummer:[${van} TO ${tot}]`);
+        const url = `${LOCATIESERVER}/free?q=*&fq=type:adres&fq=${straatFq}&fq=${woonplaatsFq}&fq=${huisnrFq}&rows=100&fl=straatnaam,huisnummer,huisletter,huisnummertoevoeging,postcode,woonplaatsnaam,adresseerbaarobject_id,nummeraanduiding_id,weergavenaam`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const filterParity = wantEven && wantOneven
+          ? () => true
+          : (doc) => (doc.huisnummer % 2 === 0) === wantEven;
+        const docs = (data.response?.docs || []).filter(filterParity);
+
+        if (!docs.length) {
+          resultsEl.innerHTML = '<p style="color:#888;">Geen adressen gevonden in dit bereik.</p>';
+          return;
+        }
+
+        const [vboInfo, energieInfo, wozInfo] = await Promise.all([
+          Promise.all(docs.map(d => fetchVboExtraForBagid(d.adresseerbaarobject_id))),
+          Promise.all(docs.map(d => fetchEnergieInfoForBagid(d.adresseerbaarobject_id))),
+          Promise.all(docs.map(d => fetchWozWaardeForNummeraanduiding(d.nummeraanduiding_id))),
+        ]);
+
+        const units = docs.map((doc, i) => ({
+          vbo: {
+            huisnummer: doc.huisnummer,
+            huisletter: doc.huisletter,
+            toevoeging: doc.huisnummertoevoeging,
+            identificatie: doc.adresseerbaarobject_id,
+          },
+          label: energieInfo[i].label,
+          ligging: liggingInfo(energieInfo[i].gebouwsubtype),
+          pandHref: vboInfo[i].pandHref,
+          oppervlakte: vboInfo[i].oppervlakte,
+          woz: wozInfo[i],
+        }));
+
+        const pandGroups = {};
+        const geenPandHref = [];
+        units.forEach(u => {
+          if (!u.pandHref) { geenPandHref.push(u); return; }
+          (pandGroups[u.pandHref] = pandGroups[u.pandHref] || []).push(u);
+        });
+
+        const multiGroups = Object.values(pandGroups).filter(g => g.length > 1);
+        const singleUnits = [...geenPandHref, ...Object.values(pandGroups).filter(g => g.length === 1).flat()]
+          .sort((a, b) => (a.vbo.huisnummer ?? 0) - (b.vbo.huisnummer ?? 0));
+
+        const currentObjectId = currentBagProps?.identificatie;
+        let html = `<p style="font-size:0.85rem;color:#6f7071;margin:0.75rem 0;">${docs.length} adressen gevonden op ${adres.straatnaam} ${van}&ndash;${tot}, verdeeld over ${Object.keys(pandGroups).length + geenPandHref.length} pand(en).</p>`;
+
+        multiGroups.forEach(group => {
+          group.sort((a, b) => (a.vbo.huisnummer ?? 0) - (b.vbo.huisnummer ?? 0));
+          const first = group[0].vbo, last = group[group.length - 1].vbo;
+          html += `<p style="font-size:0.8rem;font-weight:600;color:#263640;margin:0.75rem 0 0.35rem;">Pand: ${adres.straatnaam} ${formatHuisnummerFromProps(first)}&ndash;${formatHuisnummerFromProps(last)} (${group.length} adressen, mogelijk een VvE)</p>`;
+          html += renderPandSchemaHtml(group, currentObjectId);
+        });
+
+        if (singleUnits.length) {
+          html += `<p style="font-size:0.8rem;font-weight:600;color:#263640;margin:0.75rem 0 0.35rem;">Losse panden (grondgebonden woningen)</p>`;
+          html += `<div class="pand-verdieping-units">${singleUnits.map(u => simpleUnitChipHtml(u, currentObjectId)).join('')}</div>`;
+        }
+
+        resultsEl.innerHTML = html;
+      } catch (err) {
+        console.warn('VvE-bereik zoeken mislukt:', err);
+        resultsEl.innerHTML = '<p style="color:#888;">Zoeken naar adressen in dit bereik is mislukt.</p>';
+      }
+    }
+
+    // --- CBS Buurtdata ophalen ---
+    async function fetchCBSData(buurtcode) {
+      try {
+        const url = `${CBS_API}/TypedDataSet?$filter=trim(WijkenEnBuurten) eq '${buurtcode}'&$top=1`;
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+
+        if (!res.ok) throw new Error('CBS API fout');
+
+        const data = await res.json();
+        const records = data.value;
+
+        if (!records || records.length === 0) {
+          document.getElementById('buurt-statjes').innerHTML = '<p style="color:#888;font-size:0.9rem;">Geen CBS-data gevonden voor deze buurt.</p>';
+          return;
+        }
+
+        renderCBSData(records[0]);
+      } catch (err) {
+        console.warn('CBS data ophalen mislukt:', err);
+        document.getElementById('buurt-statjes').innerHTML = '<p style="color:#888;font-size:0.9rem;">CBS-data kon niet worden opgehaald.</p>';
+      }
+    }
+
+    function buurtStatjeHtml(waarde, label) {
+      if (waarde == null) return '';
+      return `<div><div class="buurt-statje__waarde">${waarde}</div><div class="buurt-statje__label">${label}</div></div>`;
+    }
+
+    // Compacte statistiekjes (Funda-stijl) i.p.v. de eerdere uitputtige CBS-tabel met tientallen
+    // velden - een curatie van de meest relevante cijfers voor iemand die de buurt wil peilen.
+    function renderCBSData(cbs) {
+      const container = document.getElementById('buurt-statjes');
+      let html = '';
+
+      if (cbs.AantalInwoners_5 != null) {
+        html += buurtStatjeHtml(cbs.AantalInwoners_5.toLocaleString('nl-NL'), 'inwoners');
+      }
+      if (cbs.GemiddeldeHuishoudensgrootte_33 != null) {
+        html += buurtStatjeHtml(cbs.GemiddeldeHuishoudensgrootte_33.toLocaleString('nl-NL'), 'gem. huishoudensgrootte');
+      }
+      if (cbs.GemiddeldeWOZWaardeVanWoningen_39 != null) {
+        html += buurtStatjeHtml(`€ ${Math.round(cbs.GemiddeldeWOZWaardeVanWoningen_39 * 1000).toLocaleString('nl-NL')}`, 'gem. WOZ-waarde in de buurt');
+      }
+      if (cbs.Koopwoningen_47 != null) {
+        html += buurtStatjeHtml(`${cbs.Koopwoningen_47}%`, 'koopwoningen');
+      }
+      const stedelijkheid = formatStedelijkheid(cbs.MateVanStedelijkheid_120);
+      if (stedelijkheid) html += buurtStatjeHtml(stedelijkheid, 'stedelijkheid');
+
+      html += '<div style="width:100%;margin-top:0.25rem;font-size:0.72rem;color:#aaa;">Bron: CBS Kerncijfers wijken en buurten 2024</div>';
+
+      container.innerHTML = html || '<p style="color:#888;font-size:0.9rem;">Geen CBS-data gevonden voor deze buurt.</p>';
+    }
+
+    function formatStedelijkheid(code) {
+      if (code == null) return null;
+      const labels = {
+        1: '1 - Zeer sterk stedelijk',
+        2: '2 - Sterk stedelijk',
+        3: '3 - Matig stedelijk',
+        4: '4 - Weinig stedelijk',
+        5: '5 - Niet stedelijk',
+      };
+      return labels[code] || code;
+    }
+
+    // --- Klimaateffectatlas ophalen ---
+    async function fetchKlimaatData(buurtcode) {
+      try {
+        const hitteUrl = `${KEA_WFS}?service=WFS&version=2.0.0&request=GetFeature` +
+          `&typeName=kea_public:GevoelstemperatuurBuurt_2022` +
+          `&outputFormat=application/json` +
+          `&CQL_FILTER=buurtcode='${buurtcode}'` +
+          `&count=1`;
+
+        const overstromingUrl = `${KEA_WFS}?service=WFS&version=2.0.0&request=GetFeature` +
+          `&typeName=kea_public:droge_verdiepingen_extreem_kleine_kans_20251120` +
+          `&outputFormat=application/json` +
+          `&CQL_FILTER=BU_CODE='${buurtcode}'` +
+          `&count=1` +
+          `&propertyName=BU_CODE,BU_NAAM,VALUE`;
+
+        const [hitteRes, overstromingRes] = await Promise.allSettled([
+          fetch(hitteUrl).then(r => r.json()),
+          fetch(overstromingUrl).then(r => r.json()),
+        ]);
+
+        const hitteData = hitteRes.status === 'fulfilled' && hitteRes.value?.features?.length
+          ? hitteRes.value.features[0].properties : null;
+
+        const overstromingData = overstromingRes.status === 'fulfilled' && overstromingRes.value?.features?.length
+          ? overstromingRes.value.features[0].properties : null;
+
+        currentHitteData = hitteData;
+        currentOverstromingData = overstromingData;
+        if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+
+        if (!hitteData && !overstromingData) {
+          document.getElementById('klimaat-data').innerHTML = '<p style="color:#888;">Geen klimaatdata gevonden voor deze buurt.</p>';
+          return;
+        }
+
+        renderKlimaatData(hitteData, overstromingData);
+
+      } catch (err) {
+        console.warn('Klimaatdata ophalen mislukt:', err);
+        document.getElementById('klimaat-data').innerHTML = '<p style="color:#888;">Klimaatdata kon niet worden opgehaald.</p>';
+      }
+    }
+
+    // Consistente outline-iconografie i.p.v. emoji - stroke-based, currentColor, zodat ze de
+    // statuskleur van hun risk-card/knop overnemen. Aan window gehangen (i.p.v. const) zodat ook
+    // de losse <script type="module"> van de 3D-viewer verderop dezelfde iconenset kan gebruiken.
+    window.ICONS = {
+      thermometer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13.5a4 4 0 1 0 4 0V4a2 2 0 0 0 -4 0v9.5z"/><path d="M10 9l4 0"/></svg>',
+      droplet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l4.5 6.5a5 5 0 1 1 -9 0z"/></svg>',
+      mapPin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/><path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 14.314 0z"/></svg>',
+      alertTriangle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/></svg>',
+      cube: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9l-8 4.5l-8 -4.5v-9z"/><path d="M12 12l8 -4.5"/><path d="M12 12v9"/><path d="M12 12l-8 -4.5"/></svg>',
+      tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.859 6h-2.834a2.025 2.025 0 0 0 -2.025 2.025v2.834c0 .537 .213 1.052 .593 1.432l8.774 8.773a2.025 2.025 0 0 0 2.864 0l4.775 -4.775a2.025 2.025 0 0 0 0 -2.864l-8.773 -8.774a2.025 2.025 0 0 0 -1.432 -.593z"/><path d="M9.005 9h-.005"/></svg>',
+      rotate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5"/></svg>',
+      users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/><path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M21 21v-2a4 4 0 0 0 -3 -3.85"/></svg>',
+      home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l-2 0l9 -9l9 9l-2 0"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7"/><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6"/></svg>',
+      list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l11 0"/><path d="M9 12l11 0"/><path d="M9 18l11 0"/><path d="M5 6l.01 0"/><path d="M5 12l.01 0"/><path d="M5 18l.01 0"/></svg>',
+      grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6h-6z"/><path d="M14 4h6v6h-6z"/><path d="M4 14h6v6h-6z"/><path d="M14 14h6v6h-6z"/></svg>',
+      buildings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l18 0"/><path d="M9 8l1 0"/><path d="M9 12l1 0"/><path d="M9 16l1 0"/><path d="M14 8l1 0"/><path d="M14 12l1 0"/><path d="M14 16l1 0"/><path d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16"/></svg>',
+    };
+    const ICONS = window.ICONS;
+
+    // Vaste risicoschaal: klasse/percentage -> good/warn/bad, met dezelfde grens-logica overal
+    // waar een risk-card wordt getekend (nu hitte + overstroming, later elders in de tool).
+    function risicoNiveau(fractie) {
+      // fractie: 0 (helemaal veilig/gunstig) t/m 1 (helemaal risicovol/ongunstig)
+      if (fractie <= 1 / 3) return 'good';
+      if (fractie <= 2 / 3) return 'warn';
+      return 'bad';
+    }
+
+    function risicoKaart({ icon, label, tier, primaryHtml, scalePct, scaleLabels, captionHtml, bron }) {
+      let html = `<div class="risk-card risk-card--${tier}">`;
+      html += `<div class="risk-card__icon">${icon}</div>`;
+      html += '<div class="risk-card__body">';
+      html += `<div class="stat-label">${label}</div>`;
+      html += `<div class="risk-card__primary">${primaryHtml}</div>`;
+      if (scalePct != null) {
+        html += '<div class="risk-scale">';
+        html += `<div class="risk-scale__track"><div class="risk-scale__marker" style="left:${scalePct}%"></div></div>`;
+        html += `<div class="risk-scale__labels"><span>${scaleLabels[0]}</span><span>${scaleLabels[1]}</span></div>`;
+        html += '</div>';
+      }
+      if (captionHtml) html += `<div class="stat-caption" style="margin-top:0.6rem;">${captionHtml}</div>`;
+      if (bron) html += `<div class="risk-card__source">Bron: ${bron}</div>`;
+      html += '</div></div>';
+      return html;
+    }
+
+    function renderKlimaatData(hitteData, overstromingData) {
+      const container = document.getElementById('klimaat-data');
+      let html = '';
+      const bron = 'Klimaateffectatlas (klimaateffectatlas.nl)';
+
+      if (hitteData) {
+        const pet = hitteData.PET_gem;
+        const rivmClass = hitteData.RIVMClass;
+
+        if (rivmClass != null) {
+          const rivmLabels = {
+            1: 'Geen thermische stress',
+            2: 'Matige thermische stress',
+            3: 'Sterke thermische stress',
+            4: 'Zeer sterke thermische stress',
+            5: 'Extreme thermische stress',
+            6: 'Zeer extreme thermische stress',
+          };
+          // RIVM-schaal loopt 1-6; buiten dat bereik is de waarde zelf al een aanwijzing dat er
+          // iets bijzonders aan de hand is met de brondata, dus dat lichten we expliciet toe
+          // i.p.v. de gebruiker een onverklaard getal te laten zien.
+          const buitenBereik = rivmClass < 1 || rivmClass > 6;
+          const fractie = Math.max(0, Math.min(1, (rivmClass - 1) / 5));
+          const tier = risicoNiveau(fractie);
+          const pct = fractie * 100;
+
+          let caption = `Dit is klasse ${rivmClass} op een schaal van 1 (geen stress) tot 6 (zeer extreme stress) volgens de RIVM-indeling`
+            + (pet != null ? `. Gemiddelde gevoelstemperatuur (PET) op een warme dag: <strong>${pet}\u00B0C</strong>.` : '.');
+          if (buitenBereik) {
+            caption += ' Let op: deze waarde valt buiten de gebruikelijke schaal (1-6) - mogelijk een afwijkende meting of tussentijdse update van de bron.';
+          }
+
+          html += risicoKaart({
+            icon: ICONS.thermometer,
+            label: 'Hittestress',
+            tier: buitenBereik ? 'bad' : tier,
+            primaryHtml: `<span class="risk-card__badge">${rivmLabels[rivmClass] || 'Klasse ' + rivmClass}</span>`,
+            scalePct: Math.max(0, Math.min(100, pct)),
+            scaleLabels: ['Geen stress', 'Extreme stress'],
+            captionHtml: caption,
+            bron,
+          });
+        } else if (pet != null) {
+          html += risicoKaart({
+            icon: ICONS.thermometer,
+            label: 'Hittestress',
+            tier: 'neutral',
+            primaryHtml: `<span class="stat-value-lg">${pet}\u00B0C</span>`,
+            captionHtml: 'Gemiddelde gevoelstemperatuur (PET) op een warme dag.',
+            bron,
+          });
+        }
+      }
+
+      if (overstromingData) {
+        const droogPct = overstromingData.VALUE;
+        const buurtnaam = overstromingData.BU_NAAM;
+        // Dit cijfer is een optelling over alle verdiepingen in de hele buurt (niet dit ene
+        // pand) - de brondata is alleen op buurtniveau beschikbaar, dus dat maken we expliciet.
+        const scopeLabel = buurtnaam ? `buurt ${buurtnaam}` : 'deze buurt';
+
+        if (droogPct != null) {
+          const fractie = Math.max(0, Math.min(1, (100 - droogPct) / 100));
+          const tier = risicoNiveau(fractie);
+          // Een groot "100%" direct onder het label "Overstromingsrisico" leest op het eerste
+          // gezicht als "100% risico" (het tegenovergestelde van wat het betekent) - net als bij
+          // hittestress daarom een kwalitatief label als primair inzicht, met het percentage als
+          // ondersteunend detail i.p.v. andersom.
+          const risicoLabels = { good: 'Laag risico', warn: 'Gemiddeld risico', bad: 'Hoog risico' };
+
+          html += risicoKaart({
+            icon: ICONS.droplet,
+            label: 'Overstromingsrisico',
+            tier,
+            primaryHtml: `<span class="risk-card__badge">${risicoLabels[tier]}</span>`,
+            scalePct: Math.max(0, Math.min(100, (1 - fractie) * 100)),
+            scaleLabels: ['Nat', 'Droog'],
+            captionHtml: `${droogPct}% van de verdiepingen in ${scopeLabel} blijft droog bij een overstroming met een extreem kleine kans.`,
+            bron,
+          });
+        }
+      }
+
+      if (html) {
+        html += '<button type="button" class="cta-btn cta-btn--ghost" style="margin-top:0.3rem;" onclick="bekijkOpKaart()">'
+          + `${ICONS.mapPin} Bekijk locatie op kaart</button>`;
+      }
+
+      container.innerHTML = html || '<p style="color:#888;">Geen klimaatdata gevonden voor deze buurt.</p>';
+    }
+
+    function bekijkOpKaart() {
+      const mapFold = document.getElementById('map-fold');
+      if (!mapFold) return;
+      mapFold.open = true;
+      mapFold.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // --- WOZ waarde ophalen ---
+    async function fetchWozData(nummeraanduidingId) {
+      try {
+        const url = `https://api.kadaster.nl/lvwoz/wozwaardeloket-api/v1/wozwaarde/nummeraanduiding/${nummeraanduidingId}`;
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+
+        if (!res.ok) {
+          // 5xx = storing bij het WOZ Waardeloket (komt vanzelf goed), overig = onverwacht.
+          currentWozStatus = res.status >= 500
+            ? 'Het WOZ Waardeloket is nu niet bereikbaar. Probeer het later opnieuw.'
+            : 'Tijdelijk niet op te halen.';
+          if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+          return;
+        }
+
+        const data = await res.json();
+
+        if (data.wozWaarden && data.wozWaarden.length > 0) {
+          const waarden = data.wozWaarden.sort((a, b) =>
+            new Date(b.peildatum) - new Date(a.peildatum)
+          );
+          currentWozWaarden = waarden.slice(0, 3);
+        } else {
+          currentWozStatus = 'Niet geregistreerd voor dit adres.';
+        }
+        if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+      } catch (err) {
+        // Meestal een netwerk-/CORS-fout doordat de Kadaster-API onbereikbaar is en zijn
+        // foutpagina geen CORS-headers meestuurt - functioneel hetzelfde als een 5xx-storing.
+        console.warn('WOZ data ophalen mislukt:', err);
+        currentWozStatus = 'Het WOZ Waardeloket is nu niet bereikbaar. Probeer het later opnieuw.';
+        if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+      }
+    }
+
+    // --- Kadastrale perceeloppervlakte ophalen (PDOK Kadastrale kaart WFS) ---
+    // De WFS ondersteunt geen betrouwbare CQL_FILTER op attributen, dus we vragen een kleine
+    // bbox rond het adrespunt op en matchen zelf op de kadastrale aanduiding uit de BAG-data.
+    async function fetchPerceelData(adres) {
+      const aanduiding = adres?.gekoppeld_perceel?.[0];
+      const rdMatch = adres?.centroide_rd?.match(/POINT\(([-\d.]+) ([-\d.]+)\)/);
+      if (!aanduiding || !rdMatch) {
+        clearPerceelSpinner('Niet beschikbaar');
+        perceelGeomAttempted = true;
+        renderPerceelDiagram();
+        return;
+      }
+
+      const x = parseFloat(rdMatch[1]), y = parseFloat(rdMatch[2]);
+      const buffer = 30;
+      const bbox = `${x - buffer},${y - buffer},${x + buffer},${y + buffer},EPSG:28992`;
+
+      try {
+        const url = `${KADASTRALEKAART_WFS}?service=WFS&version=2.0.0&request=GetFeature&typeName=kadastralekaart:Perceel&outputFormat=json&bbox=${encodeURIComponent(bbox)}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          clearPerceelSpinner('Niet beschikbaar');
+          return;
+        }
+
+        const data = await res.json();
+        const match = (data.features || []).find(f => {
+          const p = f.properties;
+          return `${p.AKRKadastraleGemeenteCodeWaarde}-${p.sectie}-${p.perceelnummer}` === aanduiding;
+        });
+
+        if (!match) {
+          clearPerceelSpinner('Niet gevonden');
+          return;
+        }
+
+        currentPerceelOppervlakte = match.properties.kadastraleGrootteWaarde;
+        currentPerceelGeometryRD = match.geometry?.type === 'Polygon' ? match.geometry.coordinates : null;
+        if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+      } catch (err) {
+        console.warn('Perceeldata ophalen mislukt:', err);
+        clearPerceelSpinner('Niet beschikbaar');
+      } finally {
+        perceelGeomAttempted = true;
+        renderPerceelDiagram();
+      }
+    }
+
+    function clearPerceelSpinner(msg) {
+      const el = document.getElementById('woning-perceel');
+      if (el) el.innerHTML = `<span style="color:#999;font-size:0.85rem;">${msg}</span>`;
+    }
+
+    // --- Warmteprogramma & erfgoedstatus (alleen gemeente Haarlem, open data GeoServer) ---
+    async function fetchWarmteprogramma(adres) {
+      try {
+        const res = await fetch(`${EXTRA_DATA_URL}?action=adres&bagid=${encodeURIComponent(adres.adresseerbaarobject_id)}`);
+        if (!res.ok) { clearWarmteSpinner('Niet beschikbaar'); hideErfgoedRow(); return; }
+
+        const data = await res.json();
+        const props = data.properties;
+        if (!props?.warmteprogramma) { clearWarmteSpinner('Onbekend'); hideErfgoedRow(); return; }
+
+        currentWarmteprogramma = props;
+        updateWoningWarmteprogramma(props);
+        updateWoningErfgoed(props);
+      } catch (err) {
+        console.warn('Warmteprogramma/erfgoedgegevens ophalen mislukt:', err);
+        clearWarmteSpinner('Niet beschikbaar');
+        hideErfgoedRow();
+      }
+    }
+
+    function clearWarmteSpinner(msg) {
+      const el = document.getElementById('woning-warmteprogramma');
+      if (el) el.innerHTML = `<span style="color:#999;font-size:0.85rem;">${msg}</span>`;
+    }
+
+    function warmteprogrammaHtml(props) {
+      let html = props.warmteprogramma;
+      if (props.warmteprogramma_tijdvak) {
+        html += ` <span style="color:#888;font-size:0.8rem;">(${props.warmteprogramma_tijdvak})</span>`;
+      }
+      return html;
+    }
+
+    function updateWoningWarmteprogramma(props) {
+      const el = document.getElementById('woning-warmteprogramma');
+      if (el) el.innerHTML = warmteprogrammaHtml(props);
+    }
+
+    // "waarschijnlijk geen monument" / "nvt" zijn de standaardwaarden voor de meeste panden - die
+    // melden we niet apart, alleen een daadwerkelijke monument- of beschermd-gezicht-status.
+    function erfgoedParts(props) {
+      const parts = [];
+      if (props.monumentale_status && !/geen monument/i.test(props.monumentale_status)) {
+        parts.push(props.monumentale_status);
+      }
+      if (props.binnen_beschermd_gezicht && props.binnen_beschermd_gezicht.trim().toLowerCase() !== 'nvt') {
+        parts.push(`Beschermd stadsgezicht (${props.binnen_beschermd_gezicht})`);
+      }
+      return parts;
+    }
+
+    function hideErfgoedRow() {
+      const row = document.getElementById('woning-erfgoed-row');
+      if (row) row.style.display = 'none';
+    }
+
+    function updateWoningErfgoed(props) {
+      const row = document.getElementById('woning-erfgoed-row');
+      const el = document.getElementById('woning-erfgoed');
+      if (!row || !el) return;
+      const parts = erfgoedParts(props);
+      if (!parts.length) { row.style.display = 'none'; return; }
+      row.style.display = '';
+      el.textContent = parts.join(' · ');
+    }
+
+    // --- Funderingsinformatie (alleen gemeente Haarlem, zelfde open data GeoServer) ---
+    async function fetchFundering(adres) {
+      try {
+        const res = await fetch(`${EXTRA_DATA_URL}?action=fundering&bagid=${encodeURIComponent(adres.adresseerbaarobject_id)}`);
+        if (!res.ok) { clearFunderingSpinner('Niet beschikbaar'); return; }
+
+        const data = await res.json();
+        const props = data.properties;
+        if (!props?.fnd_type_fundering) { clearFunderingSpinner('Onbekend'); return; }
+
+        currentFundering = props;
+        updateWoningFundering(props);
+      } catch (err) {
+        console.warn('Funderingsdata ophalen mislukt:', err);
+        clearFunderingSpinner('Niet beschikbaar');
+      }
+    }
+
+    function clearFunderingSpinner(msg) {
+      const el = document.getElementById('woning-fundering');
+      if (el) el.innerHTML = `<span style="color:#999;font-size:0.85rem;">${msg}</span>`;
+    }
+
+    // Waarden geverifieerd tegen de echte data (niet geraden): dit zijn de enige codes die
+    // gemeente Haarlem in fnd_type_fundering gebruikt.
+    const FUNDERING_TYPE_LABELS = {
+      houtenpaal: 'Houten paalfundering',
+      houtenpaal_betonopzetter: 'Houten paalfundering met betonopzetter',
+      betonpaal: 'Betonnen paalfundering',
+      staal: 'Fundering op staal (rechtstreeks op de grond, geen palen)',
+      leeg: 'Onbekend (geen gegevens)',
+      niet_gevonden: 'Niet gevonden in het archief',
+      gereviseerd_niet_gevonden: 'Niet gevonden in het archief (herzien)',
+    };
+
+    function funderingHtml(props) {
+      const type = props.fnd_type_fundering;
+      let html = type ? (FUNDERING_TYPE_LABELS[type.toLowerCase()] || type) : 'Onbekend';
+      const details = [];
+      if (props.fnd_onderzoek) {
+        details.push(`onderzocht${props.fnd_onderzoek_jaartal ? ' in ' + props.fnd_onderzoek_jaartal : ''}`);
+      }
+      if (props.fnd_info_funderingsherstel) details.push(`herstel: ${props.fnd_info_funderingsherstel}`);
+      if (details.length) html += ` <span style="color:#888;font-size:0.8rem;">(${details.join(', ')})</span>`;
+      return html;
+    }
+
+    function updateWoningFundering(props) {
+      const el = document.getElementById('woning-fundering');
+      if (el) el.innerHTML = funderingHtml(props);
+    }
+
+    // --- Perceel & bebouwing: schematisch diagram (RD-coordinaten, geen echte kaart) ---
+    function ringBounds(rings, bounds) {
+      rings.forEach(ring => ring.forEach(([x, y]) => {
+        if (x < bounds.minX) bounds.minX = x;
+        if (x > bounds.maxX) bounds.maxX = x;
+        if (y < bounds.minY) bounds.minY = y;
+        if (y > bounds.maxY) bounds.maxY = y;
+      }));
+    }
+
+    function ringToSvgPoints(ring, bounds, size, pad) {
+      const w = (bounds.maxX - bounds.minX) || 1;
+      const h = (bounds.maxY - bounds.minY) || 1;
+      const scale = (size - 2 * pad) / Math.max(w, h);
+      const offsetX = pad + ((size - 2 * pad) - w * scale) / 2;
+      const offsetY = pad + ((size - 2 * pad) - h * scale) / 2;
+      return ring.map(([x, y]) => {
+        const sx = offsetX + (x - bounds.minX) * scale;
+        const sy = offsetY + (bounds.maxY - y) * scale; // Y-as omdraaien: RD noord = boven
+        return `${sx.toFixed(1)},${sy.toFixed(1)}`;
+      }).join(' ');
+    }
+
+    function renderPerceelDiagram() {
+      const el = document.getElementById('perceel-diagram');
+      if (!el) return;
+
+      if (!currentPerceelGeometryRD && !currentPandGeometryRD) {
+        if (perceelGeomAttempted && pandGeomAttempted) {
+          el.innerHTML = '<p style="color:#888;font-size:0.85rem;">Geen kadastrale kaartgegevens beschikbaar.</p>';
+        }
+        return;
+      }
+
+      const hasDakdelen = currentDakDelen?.length > 0;
+
+      const size = 240, pad = 14;
+      const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      if (currentPerceelGeometryRD) ringBounds(currentPerceelGeometryRD, bounds);
+      if (currentPandGeometryRD) ringBounds(currentPandGeometryRD, bounds);
+      if (hasDakdelen) currentDakDelen.forEach(d => ringBounds([d.vlak2D], bounds));
+
+      let svg = `<svg viewBox="0 0 ${size} ${size}" width="100%" height="${size}" style="max-width:260px;display:block;">`;
+      if (currentPerceelGeometryRD) {
+        svg += `<polygon points="${ringToSvgPoints(currentPerceelGeometryRD[0], bounds, size, pad)}" fill="#e8f5f0" stroke="#6BBFAE" stroke-width="1.5" stroke-dasharray="4 2" />`;
+      }
+      if (hasDakdelen) {
+        // Dakvlakken tekenen i.p.v. één vlakke pandcontour, zodat plat/schuin per dakdeel zichtbaar is.
+        currentDakDelen.forEach(d => {
+          const kleur = d.hellingshoek < PLAT_DAK_HELLING_GRENS ? PLAT_DAK_KLEUR : DAKPAN_KLEUR;
+          svg += `<polygon points="${ringToSvgPoints(d.vlak2D, bounds, size, pad)}" fill="${kleur}" fill-opacity="0.9" stroke="#fff" stroke-width="0.75" />`;
+        });
+      } else if (currentPandGeometryRD) {
+        svg += `<polygon points="${ringToSvgPoints(currentPandGeometryRD[0], bounds, size, pad)}" fill="#263640" fill-opacity="0.85" stroke="#263640" stroke-width="1" />`;
+      }
+      svg += '</svg>';
+
+      let legend = '<div style="display:flex;gap:1rem;font-size:0.75rem;color:#6f7071;margin-top:0.35rem;flex-wrap:wrap;">';
+      if (currentPerceelGeometryRD) legend += '<span><span style="display:inline-block;width:0.7rem;height:0.7rem;background:#e8f5f0;border:1.5px dashed #6BBFAE;margin-right:0.3rem;vertical-align:middle;"></span>Perceel</span>';
+      if (hasDakdelen) {
+        legend += `<span><span style="display:inline-block;width:0.7rem;height:0.7rem;background:${DAKPAN_KLEUR};margin-right:0.3rem;vertical-align:middle;"></span>Schuin dak</span>`;
+        legend += `<span><span style="display:inline-block;width:0.7rem;height:0.7rem;background:${PLAT_DAK_KLEUR};margin-right:0.3rem;vertical-align:middle;"></span>Plat dak</span>`;
+      } else if (currentPandGeometryRD) {
+        legend += '<span><span style="display:inline-block;width:0.7rem;height:0.7rem;background:#263640;margin-right:0.3rem;vertical-align:middle;"></span>Pand</span>';
+      }
+      legend += '</div>';
+
+      el.innerHTML = `<p style="font-size:0.8rem;font-weight:600;color:#263640;margin-bottom:0.35rem;">Perceel &amp; bebouwing</p>${svg}${legend}`;
+    }
+
+    // Bouwt de regels voor de (tot) 3 meest recente WOZ-waardes, elk met het verschil t.o.v.
+    // de daaropvolgende (oudere) waarde en de peildatum.
+    function wozRowsHtml(waarden) {
+      return waarden.map((w, i) => {
+        let html = '\u20AC ' + w.vastgesteldeWaarde.toLocaleString('nl-NL');
+        const vorige = waarden[i + 1];
+        if (vorige) {
+          const verschil = w.vastgesteldeWaarde - vorige.vastgesteldeWaarde;
+          const pct = ((verschil / vorige.vastgesteldeWaarde) * 100).toFixed(1);
+          const arrow = verschil >= 0 ? '\u2191' : '\u2193';
+          const color = verschil >= 0 ? '#2e7d32' : '#c62828';
+          html += ` <span style="color:${color};font-size:0.8rem;font-weight:600;">${arrow}${pct}%</span>`;
+        }
+        html += ` <span style="color:#aaa;font-size:0.75rem;">(${new Date(w.peildatum).toLocaleDateString('nl-NL')})</span>`;
+        return html;
+      }).join('<br>');
+    }
+
+    // --- Energielabel via EP-Online proxy ---
+    const EP_PROXY_URL = 'https://adresverkenner.nl/helpers/ep-proxy.php';
+    let currentEnergielabelClip = '';
+
+    async function fetchEnergielabel(adres) {
+      const postcode = (adres.postcode || '').replace(/\s/g, '');
+      const huisnummer = adres.huisnummer || '';
+      const huisletter = adres.huisletter || '';
+      const toevoeging = adres.huisnummertoevoeging || '';
+      currentEnergielabelClip = `${postcode} ${huisnummer}${huisletter}${toevoeging ? '-' + toevoeging : ''}`.trim();
+
+      const bagid = adres.adresseerbaarobject_id || '';
+      console.log('[EP] bagid:', bagid);
+      if (!bagid) { console.log('[EP] Geen bagid, skip'); return; }
+
+      try {
+        const fetchUrl = `${EP_PROXY_URL}?bagid=${encodeURIComponent(bagid)}`;
+        console.log('[EP] Fetch:', fetchUrl);
+        const res = await fetch(fetchUrl);
+        console.log('[EP] Status:', res.status);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
+        console.log('[EP] Data keys:', Object.keys(data), '_httpStatus:', data._httpStatus);
+
+        if (data._httpStatus === 404) {
+          console.log('[EP] 404 - geen label');
+          currentEnergielabel = null;
+          currentEnergielabelStatus = 'not_found';
+          if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+          return;
+        }
+        if (data._httpStatus && data._httpStatus >= 400) throw new Error(`EP-Online: ${data._httpStatus}`);
+
+        // EP-Online response kan genest zitten in data["0"] (array-wrapper)
+        const rec = data['0'] || data;
+        console.log('[EP] Record keys:', Object.keys(rec));
+        const label = rec.LabelLetter || rec.labelLetter || rec.Energieklasse || rec.energieklasse || null;
+        const gebouwklasse = rec.Gebouwklasse || rec.gebouwklasse || '';
+        const gebouwtype = rec.Gebouwtype || rec.gebouwtype || '';
+        const energieverbruik = rec.BerekendeEnergieverbruik || rec.berekendeEnergieverbruik || null;
+        console.log('[EP] Label:', label, 'Gebouw:', gebouwklasse, gebouwtype, 'kWh:', energieverbruik);
+
+        if (label) {
+          currentEnergielabel = label;
+          currentEnergielabelStatus = null;
+          // Sla alle ingevulde velden op uit de API response
+          currentEnergielabelInfo = {};
+          const skipKeys = ['_httpStatus', '_embedded', '_links'];
+          for (const [k, v] of Object.entries(rec)) {
+            if (v != null && v !== '' && !skipKeys.includes(k)) {
+              currentEnergielabelInfo[k] = v;
+            }
+          }
+          console.log('[EP] Label getoond:', label);
+        } else {
+          currentEnergielabel = null;
+          currentEnergielabelStatus = 'not_found';
+        }
+        if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+      } catch (err) {
+        console.warn('[EP] Fout:', err);
+        currentEnergielabelStatus = 'error';
+        if (currentAdres) renderWoningData(currentAdres, currentBagProps);
+      }
+    }
+
+    function toggleEpInfo() {
+      const popup = document.getElementById('ep-info-popup');
+      if (!popup) return;
+      if (popup.style.display !== 'none') {
+        popup.style.display = 'none';
+        return;
+      }
+      if (!currentEnergielabelInfo) return;
+      const friendlyNames = {
+        LabelLetter: 'Energielabel', labelLetter: 'Energielabel',
+        Energieklasse: 'Energieklasse', energieklasse: 'Energieklasse',
+        Energieindex: 'Energie-index', energieindex: 'Energie-index',
+        Gebouwklasse: 'Gebouwklasse', gebouwklasse: 'Gebouwklasse',
+        Gebouwtype: 'Gebouwtype', gebouwtype: 'Gebouwtype',
+        Gebouwsubtype: 'Gebouwsubtype', gebouwsubtype: 'Gebouwsubtype',
+        BerekendeEnergieverbruik: 'Berekend energieverbruik', berekendeEnergieverbruik: 'Berekend energieverbruik',
+        EP2Waarde: 'EP2 waarde', ep2Waarde: 'EP2 waarde',
+        Registratiedatum: 'Registratiedatum', registratiedatum: 'Registratiedatum',
+        Opnamedatum: 'Opnamedatum', opnamedatum: 'Opnamedatum',
+        Berekeningstype: 'Berekeningstype', berekeningstype: 'Berekeningstype',
+        Status: 'Status', status: 'Status',
+        IsVereenvoudigd: 'Vereenvoudigd', isVereenvoudigd: 'Vereenvoudigd',
+        Geldigheid: 'Geldigheid', geldigheid: 'Geldigheid',
+        AfmeldNummer: 'Afmeldnummer', afmeldNummer: 'Afmeldnummer',
+        Postcode: 'Postcode', postcode: 'Postcode',
+        HuisNummer: 'Huisnummer', huisNummer: 'Huisnummer',
+        Huisletter: 'Huisletter', huisletter: 'Huisletter',
+        HuisNrToevoeging: 'Huisnr toevoeging', huisNrToevoeging: 'Huisnr toevoeging',
+        DetailaanduidingType: 'Detailaanduiding type',
+        Bagverblijfsobjectid: 'BAG verblijfsobject ID', bagVerblijfsobjectId: 'BAG verblijfsobject ID',
+        PandId: 'Pand ID',
+      };
+      let html = '<table>';
+      for (const [k, v] of Object.entries(currentEnergielabelInfo)) {
+        if (v == null || v === '') continue;
+        const name = friendlyNames[k] || k;
+        let val = v;
+        if (typeof val === 'boolean') val = val ? 'Ja' : 'Nee';
+        if (typeof val === 'number') val = val.toLocaleString('nl-NL');
+        html += `<tr><td>${name}</td><td>${val}</td></tr>`;
+      }
+      html += '</table>';
+      html += `<p style="margin-top:0.5rem;font-size:0.7rem;color:#aaa;">Bron: EP-Online (RVO)</p>`;
+      popup.innerHTML = html;
+      popup.style.display = 'block';
+    }
+
+    function openEnergielabel() {
+      if (currentEnergielabelClip) {
+        navigator.clipboard.writeText(currentEnergielabelClip).catch(() => {});
+      }
+      window.open('https://www.energielabel.nl/woningen/zoek-je-energielabel/', '_blank');
+    }
+
+    // --- Render functies ---
+    function renderWoningData(adres, bagProps) {
+      const kop = document.getElementById('pagina-kop');
+
+      // 1. Titelblok
+      document.getElementById('pagina-titel').textContent = `${adres.straatnaam || ''} ${formatHuisnummer(adres)}`.trim() || 'Onbekend adres';
+      document.getElementById('pagina-subtitel').textContent = [adres.postcode, adres.woonplaatsnaam].filter(Boolean).join(' ');
+
+      // 2. Kenmerkenregel: alleen tonen wat al bekend is, groeit vanzelf mee terwijl data
+      // binnenkomt (geen losse spinner per veld nodig in een sobere, doorlopende regel).
+      const kenmerkenDelen = [];
+      if (bagProps?.oppervlakte != null) kenmerkenDelen.push(`${bagProps.oppervlakte} m² wonen`);
+      if (currentPerceelOppervlakte != null) kenmerkenDelen.push(`${currentPerceelOppervlakte} m² perceel`);
+      if (currentPand?.bouwjaar) kenmerkenDelen.push(`bouwjaar ${currentPand.bouwjaar}`);
+      if (currentEnergielabel) kenmerkenDelen.push(`energielabel ${currentEnergielabel}`);
+      document.getElementById('kenmerken-regel').textContent = kenmerkenDelen.join(' · ');
+
+      // 3. Eén-regel feitelijke samenvatting (geen marketingtaal)
+      document.getElementById('pagina-samenvatting').textContent = maakSamenvatting(adres, bagProps);
+
+      // 4. WOZ-waarde
+      renderWozBlok();
+
+      // 5. Gegroepeerde kenmerken (Bouw / Oppervlakten en inhoud / Energie / Kadastrale gegevens)
+      renderKenmerkenSecties(adres, bagProps);
+
+      kop.style.display = 'block';
+      kop.dataset.hasContent = 'true';
+
+      renderMediaNav();
+    }
+
+    // Snelle navigatie (Funda's Foto's/Plattegrond/360°-balk als voorbeeld): springt naar een
+    // sectie verderop op dezelfde doorlopende pagina, verbergt niets. Wordt opnieuw opgebouwd
+    // telkens als renderWoningData draait, zodat alleen secties met daadwerkelijk geladen data
+    // in de lijst staan.
+    function renderMediaNav() {
+      const nav = document.getElementById('media-nav');
+      if (!nav) return;
+
+      const heeftContent = id => document.getElementById(id)?.dataset.hasContent === 'true';
+      const items = [
+        { id: 'kenmerken-secties', label: 'Kenmerken', icon: ICONS.list, tonen: heeftContent('pagina-kop') },
+        { id: 'dak-card', label: 'Dakoppervlak', icon: ICONS.cube, tonen: heeftContent('dak-card'), aantal: currentDakDelen?.length },
+        {
+          id: 'vve-card',
+          label: document.getElementById('vve-card-title-text')?.textContent || 'Adressen in dit pand',
+          icon: ICONS.users,
+          tonen: heeftContent('vve-card'),
+          aantal: currentPand?.aantal_verblijfsobjecten > 1 ? currentPand.aantal_verblijfsobjecten : null,
+        },
+        { id: 'buurt-sectie', label: 'Buurt', icon: ICONS.buildings, tonen: heeftContent('buurt-sectie') },
+        { id: 'map-fold', label: 'Kaart', icon: ICONS.mapPin, tonen: heeftContent('map-fold') },
+        { id: 'details-card', label: 'Alle kenmerken', icon: ICONS.list, tonen: heeftContent('details-card') },
+      ].filter(i => i.tonen);
+
+      if (!items.length) {
+        nav.classList.remove('active');
+        nav.innerHTML = '';
+        return;
+      }
+
+      nav.innerHTML = items
+        .map(i => `<button type="button" class="media-nav-item" data-target="${i.id}">${i.icon}${i.label}${i.aantal != null ? ` <span class="media-nav-count">${i.aantal}</span>` : ''}</button>`)
+        .join('');
+      nav.classList.add('active');
+    }
+
+    document.getElementById('media-nav').addEventListener('click', (e) => {
+      const btn = e.target.closest('.media-nav-item');
+      if (!btn) return;
+      document.getElementById(btn.dataset.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    // Neutrale, feitelijke één-regelsamenvatting - blijft leeg totdat er tenminste een
+    // woningtype of bouwjaar bekend is, groeit daarna mee met WOZ en klimaatrisico.
+    function maakSamenvatting(adres, bagProps) {
+      const epType = currentEnergielabelInfo?.Gebouwsubtype || currentEnergielabelInfo?.gebouwsubtype
+        || currentEnergielabelInfo?.Gebouwtype || currentEnergielabelInfo?.gebouwtype;
+      const doel = currentPand?.gebruiksdoel || bagProps?.gebruiksdoel;
+      const type = epType || (doel ? formatGebruiksdoel(doel) : null);
+
+      if (!type && !currentPand?.bouwjaar) return '';
+
+      let zin = type || 'Woning';
+      if (currentPand?.bouwjaar) zin += ` uit ${currentPand.bouwjaar}`;
+      const delen = [zin];
+
+      if (currentWozWaarden?.length) {
+        delen.push(`WOZ-waarde € ${currentWozWaarden[0].vastgesteldeWaarde.toLocaleString('nl-NL')}`);
+      }
+
+      // Overstromingsrisico weegt zwaarder dan hittestress voor een woning (potentieel
+      // ingrijpender) - toon dat als beide bekend zijn, anders wat er wel is.
+      if (currentOverstromingData?.VALUE != null) {
+        const fractie = Math.max(0, Math.min(1, (100 - currentOverstromingData.VALUE) / 100));
+        const niveau = risicoNiveau(fractie);
+        const label = niveau === 'good' ? 'laag' : niveau === 'warn' ? 'gemiddeld' : 'hoog';
+        delen.push(`in een gebied met ${label} overstromingsrisico`);
+      } else if (currentHitteData?.RIVMClass != null) {
+        const fractie = Math.max(0, Math.min(1, (currentHitteData.RIVMClass - 1) / 5));
+        const niveau = risicoNiveau(fractie);
+        const label = niveau === 'good' ? 'lage' : niveau === 'warn' ? 'gemiddelde' : 'hoge';
+        delen.push(`in een gebied met ${label} hittestress`);
+      }
+
+      return delen.join(', ') + '.';
+    }
+
+    function renderWozBlok() {
+      const el = document.getElementById('woz-blok');
+      if (!el) return;
+
+      if (currentWozWaarden?.length) {
+        el.className = 'woz-blok';
+        const nieuwste = currentWozWaarden[0];
+        const perM2 = currentBagProps?.oppervlakte ? Math.round(nieuwste.vastgesteldeWaarde / currentBagProps.oppervlakte) : null;
+        let html = `<div class="woz-bedrag">€ ${nieuwste.vastgesteldeWaarde.toLocaleString('nl-NL')}</div>`;
+        html += `<div class="woz-peildatum">WOZ-waarde per ${new Date(nieuwste.peildatum).toLocaleDateString('nl-NL')}`
+          + (perM2 != null ? ` · € ${perM2.toLocaleString('nl-NL')} per m²` : '') + `</div>`;
+        if (currentWozWaarden.length > 1) {
+          html += `<div class="woz-historie">${wozRowsHtml(currentWozWaarden)}</div>`;
+        }
+        el.innerHTML = html;
+        return;
+      }
+
+      // Geen cijfer om te tonen: kaderloze, onopvallende regel i.p.v. het witte vlak (dat anders
+      // als uitgeschakeld invoerveld leest).
+      if (currentWozStatus) {
+        el.className = 'woz-blok woz-blok--leeg';
+        el.innerHTML = `<div class="woz-melding"><strong>WOZ-waarde</strong><span>${currentWozStatus}</span></div>`;
+        return;
+      }
+
+      el.className = 'woz-blok woz-blok--leeg';
+      el.innerHTML = '<div class="woz-melding"><span class="data-loading"><span class="spinner-sm"></span> WOZ-waarde ophalen…</span></div>';
+    }
+
+    function kenmerkenGroepHtml(titel, rowsHtml) {
+      if (!rowsHtml) return '';
+      return `<div class="kenmerken-groep"><h3>${titel}</h3><table class="compact-table">${rowsHtml}</table></div>`;
+    }
+
+    function kenmerkenRij(label, value) {
+      return `<tr><td>${label}</td><td>${value}</td></tr>`;
+    }
+
+    // Gegroepeerd volgens Funda's eigen indeling (Bouw / Oppervlakten en inhoud / Energie /
+    // Kadastrale gegevens), gevuld met onze eigen brondata. "Indeling" (kamers/slaapkamers) is
+    // weggelaten - die data bestaat niet in de open BAG-/Kadaster-bronnen die deze tool gebruikt.
+    function renderKenmerkenSecties(adres, bagProps) {
+      const el = document.getElementById('kenmerken-secties');
+      if (!el) return;
+      const spinner = '<span class="data-loading"><span class="spinner-sm"></span></span>';
+      let html = '';
+
+      // Bouw
+      let bouwRows = '';
+      if (currentPand?.bouwjaar) bouwRows += kenmerkenRij('Bouwjaar', currentPand.bouwjaar);
+      if (currentPand?.status) bouwRows += kenmerkenRij('Status', statusToBadge(currentPand.status));
+      const gebruiksdoel = currentPand?.gebruiksdoel || bagProps?.gebruiksdoel;
+      if (gebruiksdoel) bouwRows += kenmerkenRij('Gebruiksdoel', formatGebruiksdoel(gebruiksdoel));
+      if (currentPand?.aantal_verblijfsobjecten != null) {
+        bouwRows += kenmerkenRij('Aantal adressen in pand', currentPand.aantal_verblijfsobjecten);
+      }
+      // Haarlem-specifieke gegevens (open data GeoServer) - eigen ids voor de bestaande
+      // updateWoningWarmteprogramma()/updateWoningErfgoed()/updateWoningFundering()-updaters.
+      if (SHOW_HAARLEM_INFO && adres.gemeentenaam === 'Haarlem') {
+        const warmteContent = currentWarmteprogramma ? warmteprogrammaHtml(currentWarmteprogramma) : spinner;
+        bouwRows += kenmerkenRij('Warmteprogramma', `<span id="woning-warmteprogramma">${warmteContent}</span>`);
+        const parts = currentWarmteprogramma ? erfgoedParts(currentWarmteprogramma) : [];
+        const erfgoedVerborgen = currentWarmteprogramma && !parts.length;
+        bouwRows += `<tr id="woning-erfgoed-row"${erfgoedVerborgen ? ' style="display:none"' : ''}><td>Erfgoedstatus</td><td id="woning-erfgoed">${parts.join(' · ')}</td></tr>`;
+        const funderingContent = currentFundering ? funderingHtml(currentFundering) : spinner;
+        bouwRows += kenmerkenRij('Fundering', `<span id="woning-fundering">${funderingContent}</span>`);
+      }
+      html += kenmerkenGroepHtml('Bouw', bouwRows);
+
+      // Oppervlakten en inhoud
+      let oppRows = '';
+      if (bagProps?.oppervlakte != null) oppRows += kenmerkenRij('Woonoppervlak', `${bagProps.oppervlakte} m&sup2;`);
+      if (currentPerceelOppervlakte != null) oppRows += kenmerkenRij('Perceeloppervlakte', `${currentPerceelOppervlakte} m&sup2;`);
+      const inhoud = currentDakData?.b3_volume_lod22 ?? currentDakData?.b3_volume_lod13 ?? currentDakData?.b3_volume_lod12;
+      if (inhoud != null) oppRows += kenmerkenRij('Inhoud', `${inhoud.toLocaleString('nl-NL', { maximumFractionDigits: 0 })} m&sup3;`);
+      if (currentDakData?.b3_bouwlagen != null) oppRows += kenmerkenRij('Bouwlagen', currentDakData.b3_bouwlagen);
+      if (currentDakData?.b3_opp_grond != null) {
+        oppRows += kenmerkenRij('Grondoppervlak', `${currentDakData.b3_opp_grond.toLocaleString('nl-NL', { maximumFractionDigits: 1 })} m&sup2;`);
+      }
+      html += kenmerkenGroepHtml('Oppervlakten en inhoud', oppRows);
+
+      // Energie
+      let energieRows = '';
+      if (currentEnergielabel) {
+        let labelCel = energielabelBadgeHtml(currentEnergielabel);
+        const gt = currentEnergielabelInfo?.Gebouwtype || currentEnergielabelInfo?.gebouwtype || '';
+        const gk = currentEnergielabelInfo?.Gebouwklasse || currentEnergielabelInfo?.gebouwklasse || '';
+        const details = [gt, gk].filter(Boolean);
+        if (details.length) labelCel += ` <span style="font-size:0.75rem;color:#888;margin-left:0.4rem;">${details.join(' · ')}</span>`;
+        labelCel += ` <button class="ep-info-btn" onclick="toggleEpInfo()" title="EP-Online details">ⓘ</button>`;
+        labelCel += `<div id="ep-info-popup" class="ep-info-popup" style="display:none;"></div>`;
+        energieRows += kenmerkenRij('Energielabel', labelCel);
+      } else if (currentEnergielabelStatus === 'not_found') {
+        energieRows += kenmerkenRij('Energielabel', `<span style="color:#999;">Geen label gevonden</span> <a href="#" onclick="openEnergielabel();return false;" style="color:#4361ee;font-size:0.85rem;margin-left:0.3rem;">Zoek op EP-Online &rarr;</a>`);
+      } else if (currentEnergielabelStatus === 'error') {
+        energieRows += kenmerkenRij('Energielabel', `<a href="#" onclick="openEnergielabel();return false;" style="color:#4361ee;">Zoek op EP-Online &rarr;</a> <span style="font-size:0.75rem;color:#aaa;">(kopieert postcode+nr)</span>`);
+      }
+      html += kenmerkenGroepHtml('Energie', energieRows);
+
+      // Kadastrale gegevens
+      let kadRows = '';
+      const aanduiding = adres?.gekoppeld_perceel?.[0];
+      if (aanduiding) kadRows += kenmerkenRij('Kadastrale aanduiding', aanduiding);
+      if (currentPerceelOppervlakte != null) kadRows += kenmerkenRij('Perceeloppervlakte', `${currentPerceelOppervlakte} m&sup2;`);
+      html += kenmerkenGroepHtml('Kadastrale gegevens', kadRows);
+
+      el.innerHTML = html;
+    }
+
+
+    function renderAddressData(adres) {
+      const grid = document.getElementById('address-data');
+      const items = [
+        { label: 'Straat', value: adres.straatnaam || '-' },
+        { label: 'Huisnummer', value: formatHuisnummer(adres) },
+        { label: 'Postcode', value: adres.postcode || '-' },
+        { label: 'Woonplaats', value: adres.woonplaatsnaam || '-' },
+        { label: 'Gemeente', value: adres.gemeentenaam || '-' },
+        { label: 'Provincie', value: adres.provincienaam || '-' },
+        { label: 'Buurt', value: adres.buurtnaam || '-' },
+        { label: 'Wijk', value: adres.wijknaam || '-' },
+        { label: 'Waterschap', value: adres.waterschapsnaam || '-' },
+      ];
+
+      grid.innerHTML = renderGrid(items);
+
+      const sourceLink = document.getElementById('source-link');
+      const bagUrl = `https://bagviewer.kadaster.nl/lvbag/bag-viewer/#?searchQuery=${encodeURIComponent(adres.weergavenaam || '')}`;
+      sourceLink.innerHTML = `<a href="${bagUrl}" target="_blank" rel="noopener">Bekijk in BAG Viewer &rarr;</a>`;
+    }
+
+    function renderBuildingData(pand) {
+      const grid = document.getElementById('building-data');
+      const items = [
+        { label: 'Bouwjaar', value: pand.bouwjaar || '-' },
+        { label: 'Status', value: statusToBadge(pand.status) },
+        { label: 'Gebruiksdoel', value: pand.gebruiksdoel ? formatGebruiksdoel(pand.gebruiksdoel) : '-' },
+        { label: 'Aantal verblijfsobjecten', value: pand.aantal_verblijfsobjecten ?? '-' },
+      ];
+
+      grid.innerHTML = renderGrid(items);
+    }
+
+    function renderObjectData(props, objectType) {
+      // Voeg object-specifieke velden toe aan het adres-panel (ontdubbeld)
+      const grid = document.getElementById('address-data');
+
+      const typeLabels = {
+        'verblijfsobject': 'Verblijfsobject',
+        'ligplaats': 'Ligplaats',
+        'standplaats': 'Standplaats',
+      };
+
+      const items = [
+        { label: 'Type object', value: typeLabels[objectType] || objectType },
+        { label: 'Status', value: statusToBadge(props.status) },
+        { label: 'Gebruiksdoel', value: props.gebruiksdoel ? formatGebruiksdoel(props.gebruiksdoel) : '-' },
+      ];
+
+      if (props.oppervlakte != null) {
+        items.push({ label: 'Oppervlakte', value: `${props.oppervlakte} m&sup2;` });
+      }
+
+      // Append na bestaande adresgegevens
+      grid.innerHTML += renderGrid(items);
+    }
+
+    function renderMap(adres) {
+      const container = document.getElementById('map-container');
+      if (!adres.centroide_ll) {
+        container.innerHTML = '<p style="padding:1rem;color:#888;">Geen coordinaten beschikbaar</p>';
+        return;
+      }
+
+      const match = adres.centroide_ll.match(/POINT\(([\d.]+)\s+([\d.]+)\)/);
+      if (!match) return;
+
+      const lon = match[1];
+      const lat = match[2];
+
+      container.innerHTML = `<iframe
+        src="https://www.openstreetmap.org/export/embed.html?bbox=${lon-0.002},${lat-0.001},${Number(lon)+0.002},${Number(lat)+0.001}&layer=mapnik&marker=${lat},${lon}"
+        loading="lazy"
+      ></iframe>`;
+    }
+
+    // --- Helpers ---
+    function renderGrid(items) {
+      return items.map(item => `
+        <div class="data-item">
+          <div class="label">${item.label}</div>
+          <div class="value">${item.value}</div>
+        </div>
+      `).join('');
+    }
+
+    function formatHuisnummer(adres) {
+      if (adres.huis_nlt) return adres.huis_nlt;
+      let nr = adres.huisnummer?.toString() || '';
+      if (adres.huisletter) nr += adres.huisletter;
+      if (adres.huisnummertoevoeging) nr += '-' + adres.huisnummertoevoeging;
+      return nr || '-';
+    }
+
+    function formatHuisnummerFromProps(props) {
+      let nr = props.huisnummer?.toString() || '';
+      if (props.huisletter) nr += props.huisletter;
+      if (props.toevoeging) nr += '-' + props.toevoeging;
+      return nr || '-';
+    }
+
+    function formatGebruiksdoel(doel) {
+      if (!doel) return '-';
+      const doelen = Array.isArray(doel) ? doel : [doel];
+      const map = {
+        'woonfunctie': 'Woonfunctie',
+        'bijeenkomstfunctie': 'Bijeenkomstfunctie',
+        'celfunctie': 'Celfunctie',
+        'gezondheidszorgfunctie': 'Gezondheidszorgfunctie',
+        'industriefunctie': 'Industriefunctie',
+        'kantoorfunctie': 'Kantoorfunctie',
+        'logiesfunctie': 'Logiesfunctie',
+        'onderwijsfunctie': 'Onderwijsfunctie',
+        'sportfunctie': 'Sportfunctie',
+        'winkelfunctie': 'Winkelfunctie',
+        'overige gebruiksfunctie': 'Overige gebruiksfunctie',
+      };
+      return doelen.map(d => map[d?.toLowerCase()] || d).join(', ');
+    }
+
+    function statusToBadge(status) {
+      if (!status) return '-';
+      const s = status.toLowerCase();
+      let cls = 'badge-blue';
+      if (s.includes('in gebruik') || s.includes('aangewezen') || s.includes('uitgegeven')) cls = 'badge-green';
+      else if (s.includes('gesloopt') || s.includes('ingetrokken') || s.includes('niet gerealiseerd')) cls = 'badge-orange';
+      return `<span class="badge ${cls}">${status}</span>`;
+    }
+
+    function showLoading() { loadingEl.classList.add('active'); }
+    function hideLoading() { loadingEl.classList.remove('active'); }
+    function showResults() {
+      resultsEl.classList.add('active');
+    }
+    function hideResults() {
+      resultsEl.classList.remove('active');
+    }
+    function showError(msg) { errorEl.textContent = msg; errorEl.classList.add('active'); }
+    function hideError() { errorEl.classList.remove('active'); }
+
+
+    // --- Adres uit de URL herstellen (delen/verversen, of vanuit een extern systeem linken) ---
+    // Drie manieren, in volgorde van voorrang:
+    // - ?pandid=<BAG pand-ID(s), komma-gescheiden> - voor een VvE-dashboard dat pand-ID's heeft
+    //   (niet adresseerbaarobject_id's). Werkt direct met 3D BAG, geen omweg via een adres nodig
+    //   voor het Dakoppervlak-kaartje; voor "Uw woning" wordt een willekeurig adres in het eerste
+    //   pand opgezocht.
+    // - ?bagid=<adresseerbaarobject-ID(s), komma-gescheiden> - stabiele, extern bekende
+    //   adres-identifier. Eerste bagid bepaalt "Uw woning"; bij meerdere wordt per bagid het
+    //   bijbehorende pand opgezocht en samengevoegd (zelfde eindresultaat als ?pandid, maar
+    //   vertrekkend vanuit adressen i.p.v. panden).
+    // - ?id=<Locatieserver Solr-id> - wat de app zelf in de URL zet bij delen/verversen.
+    const initieleUrlParams = new URLSearchParams(window.location.search);
+    const initieelPandId = initieleUrlParams.get('pandid');
+    const initieelBagId = initieleUrlParams.get('bagid');
+    const initieelAdresId = initieleUrlParams.get('id');
+
+    // In een 16-cijferige BAG-identificatie geven positie 5-6 het objecttype aan: '10' = pand,
+    // '01'/'02'/'03' = verblijfsobject/ligplaats/standplaats (de adresseerbare objecten). Zo kunnen
+    // we een per ongeluk verwisselde ?pandid=/?bagid= alsnog naar de juiste afhandeling sturen
+    // i.p.v. een lege pagina te tonen.
+    const isBagPandId = (id) => /^\d{16}$/.test(id) && id.substr(4, 2) === '10';
+    const isBagAdresObjectId = (id) => /^\d{16}$/.test(id) && ['01', '02', '03'].includes(id.substr(4, 2));
+
+    async function verwerkPandIds(pandIds) {
+      if (EMBEDDED_MODE) {
+        // Geen adres ophalen/tonen - alleen de resultatensectie openen voor het Dakoppervlak-kaartje.
+        showResults();
+      } else {
+        const eersteAdresBagid = await resolveEersteAdresVoorPand(pandIds[0]);
+        if (eersteAdresBagid) {
+          await selectAddressByBagId(eersteAdresBagid);
+        } else {
+          // Geen adres gevonden voor dit pand: toon in elk geval de resultatensectie, anders
+          // blijft #results (en dus het Dakoppervlak-kaartje) verborgen.
+          showResults();
+        }
+      }
+      await fetchDakDataVoorPanden(pandIds);
+    }
+
+    async function verwerkBagIds(bagids) {
+      if (EMBEDDED_MODE) {
+        showResults();
+        await fetchDakDataMeerdereBagids(bagids);
+        return;
+      }
+      const ok = await selectAddressByBagId(bagids[0]);
+      if (!ok) {
+        showResults();
+        showError(`Geen adres gevonden voor bagid ${bagids[0]}. Controleer of dit een adresseerbaarobject-ID is (niet een pand-ID).`);
+        return;
+      }
+      if (bagids.length > 1) await fetchDakDataMeerdereBagids(bagids);
+    }
+
+    if (initieelPandId) {
+      const ids = initieelPandId.split(',').map(s => s.trim()).filter(Boolean);
+      // ?pandid= met in werkelijkheid adresseerbaarobject-ID's: via de bagid-route afhandelen.
+      (ids.every(isBagAdresObjectId) ? verwerkBagIds(ids) : verwerkPandIds(ids));
+    } else if (initieelBagId) {
+      const ids = initieelBagId.split(',').map(s => s.trim()).filter(Boolean);
+      // ?bagid= met in werkelijkheid pand-ID's: via de pandid-route afhandelen.
+      (ids.every(isBagPandId) ? verwerkPandIds(ids) : verwerkBagIds(ids));
+    } else if (initieelAdresId && !EMBEDDED_MODE) {
+      selectSuggestion({ id: initieelAdresId, weergavenaam: '' });
+    }
+  </script>
+
+  <!-- --- 3D dakmodel (Three.js, lazy geladen via toggleDakViewer) --- -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+    const DAKPAN_KLEUR = 0xa0522d;   // schuin dak: dakpankleur (terracotta)
+    const PLAT_DAK_KLEUR = 0x8a8a8a; // plat dak: middengrijs
+    const WAND_KLEUR = 0xfff2a1;     // gevels: lichtgeel
+    const GROND_KLEUR = 0xcfcac2;
+
+    // Trianguleert een plat (mogelijk niet-convex) vlak in de ruimte: projecteert naar 2D in
+    // het vlak van de polygoon en past ear-clipping toe (THREE.ShapeUtils), zodat ook
+    // wanden met inspringingen (dakkapellen e.d.) correct getekend worden.
+    function triangulateFace(punten3D) {
+      let nx = 0, ny = 0, nz = 0;
+      const n = punten3D.length;
+      for (let i = 0; i < n; i++) {
+        const [x1, y1, z1] = punten3D[i];
+        const [x2, y2, z2] = punten3D[(i + 1) % n];
+        nx += (y1 - y2) * (z1 + z2);
+        ny += (z1 - z2) * (x1 + x2);
+        nz += (x1 - x2) * (y1 + y2);
+      }
+      const normal = new THREE.Vector3(nx, ny, nz);
+      if (normal.lengthSq() < 1e-10) return [];
+      normal.normalize();
+
+      const ref = Math.abs(normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+      const u = new THREE.Vector3().crossVectors(ref, normal).normalize();
+      const v = new THREE.Vector3().crossVectors(normal, u).normalize();
+
+      const p0 = new THREE.Vector3(...punten3D[0]);
+      const pts2D = punten3D.map(p => {
+        const rel = new THREE.Vector3(...p).sub(p0);
+        return new THREE.Vector2(rel.dot(u), rel.dot(v));
+      });
+
+      try {
+        return THREE.ShapeUtils.triangulateShape(pts2D, []);
+      } catch (err) {
+        return [];
+      }
+    }
+
+    // RD (x=oost, y=noord, z=hoogte) -> three.js (Y-up)
+    function naarThreeCoord([x, y, z], center) {
+      return [x - center.x, z - center.z, -(y - center.y)];
+    }
+
+    function buildFaceGroupGeometry(faces, center) {
+      const positions = [];
+      faces.forEach(f => {
+        const triIdx = triangulateFace(f.punten);
+        triIdx.forEach(tri => {
+          tri.forEach(idx => {
+            positions.push(...naarThreeCoord(f.punten[idx], center));
+          });
+        });
+      });
+      if (!positions.length) return null;
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geom.computeVertexNormals();
+      return geom;
+    }
+
+    // Er is maar één 3D-viewer tegelijk in de pagina; bij het kiezen van een nieuw adres of
+    // het herladen van de viewer moet de vorige requestAnimationFrame-lus altijd gestopt
+    // worden, anders blijft die onzichtbaar op de achtergrond doorrenderen (geheugen-/CPU-lek).
+    let currentViewer = null; // { container, stop }
+
+    window.stopDakViewer = function stopDakViewer() {
+      if (currentViewer) {
+        currentViewer.stop();
+        currentViewer = null;
+      }
+    };
+
+    window.initDakViewer = function initDakViewer(container, faces) {
+      if (!faces?.length) {
+        container.innerHTML = '<p style="padding:1rem;color:#888;font-size:0.85rem;">Geen geometrie beschikbaar voor 3D-model.</p>';
+        return;
+      }
+
+      // Al eerder opgebouwd voor dit adres/deze container? Dan niet opnieuw initialiseren.
+      if (currentViewer && currentViewer.container === container) return;
+      window.stopDakViewer();
+
+      container.innerHTML = '';
+      container.style.touchAction = 'none';
+
+      // Middelpunt (bounding box) van het pand: draaipunt van de camera.
+      const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
+      faces.forEach(f => f.punten.forEach(([x, y, z]) => {
+        if (x < bounds.minX) bounds.minX = x; if (x > bounds.maxX) bounds.maxX = x;
+        if (y < bounds.minY) bounds.minY = y; if (y > bounds.maxY) bounds.maxY = y;
+        if (z < bounds.minZ) bounds.minZ = z; if (z > bounds.maxZ) bounds.maxZ = z;
+      }));
+      const center = {
+        x: (bounds.minX + bounds.maxX) / 2,
+        y: (bounds.minY + bounds.maxY) / 2,
+        z: (bounds.minZ + bounds.maxZ) / 2,
+      };
+      const afmeting = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, bounds.maxZ - bounds.minZ, 5);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf5f8f9);
+
+      const width = container.clientWidth || 300;
+      const height = container.clientHeight || 340;
+      const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, afmeting * 20);
+      camera.position.set(afmeting * 0.9, afmeting * 0.75, afmeting * 0.9);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(width, height);
+      container.appendChild(renderer.domElement);
+
+      const labelRenderer = new CSS2DRenderer();
+      labelRenderer.setSize(width, height);
+      labelRenderer.domElement.style.position = 'absolute';
+      labelRenderer.domElement.style.top = '0';
+      labelRenderer.domElement.style.left = '0';
+      labelRenderer.domElement.style.pointerEvents = 'none';
+      container.appendChild(labelRenderer.domElement);
+
+      const hint = document.createElement('div');
+      hint.textContent = 'Sleep om te draaien';
+      hint.style.cssText = 'position:absolute;bottom:0.4rem;right:0.6rem;font-size:0.7rem;color:#999;background:rgba(255,255,255,0.7);padding:0.1rem 0.4rem;border-radius:3px;pointer-events:none;';
+      container.appendChild(hint);
+
+      // Knopjes rechtsboven: labels aan/uit (bij veel dakvlakken wordt het al snel onoverzichtelijk)
+      // en rotatie pauzeren/hervatten. Iets prominenter dan voorheen (groter, met icoon) zodat
+      // duidelijker is dat dit bedienbare knoppen zijn, geen bijschrift.
+      const knopStijl = 'font-size:0.75rem;font-weight:600;color:#263640;background:rgba(255,255,255,0.92);'
+        + 'border:1px solid #d8dcde;padding:0.35rem 0.65rem;border-radius:4px;cursor:pointer;font-family:inherit;'
+        + 'display:inline-flex;align-items:center;gap:0.35rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);';
+      const knopIconStijl = 'display:inline-flex;width:0.9rem;height:0.9rem;flex-shrink:0;';
+      const setKnopLabel = (btn, icon, tekst) => {
+        btn.innerHTML = `<span style="${knopIconStijl}">${icon}</span>${tekst}`;
+      };
+
+      const viewerControls = document.createElement('div');
+      viewerControls.style.cssText = 'position:absolute;top:0.4rem;right:0.4rem;display:flex;gap:0.35rem;z-index:2;';
+      container.appendChild(viewerControls);
+
+      const labelToggleBtn = document.createElement('button');
+      labelToggleBtn.type = 'button';
+      labelToggleBtn.style.cssText = knopStijl;
+      viewerControls.appendChild(labelToggleBtn);
+
+      const rotatieToggleBtn = document.createElement('button');
+      rotatieToggleBtn.type = 'button';
+      setKnopLabel(rotatieToggleBtn, window.ICONS.rotate, 'Rotatie stoppen');
+      rotatieToggleBtn.style.cssText = knopStijl;
+      viewerControls.appendChild(rotatieToggleBtn);
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+      const zon = new THREE.DirectionalLight(0xffffff, 0.9);
+      zon.position.set(afmeting, afmeting * 1.5, afmeting * 0.6);
+      scene.add(zon);
+      const vullicht = new THREE.DirectionalLight(0xffffff, 0.35);
+      vullicht.position.set(-afmeting, afmeting * 0.5, -afmeting);
+      scene.add(vullicht);
+
+      // Vlakken groeperen per kleur/materiaal. Drempel van 15°: platte daken met zonnepanelen op
+      // een opstelsysteem meten vaak 10-15° door de kanteling van de panelen zelf.
+      const dakSchuin = faces.filter(f => f.type === 'RoofSurface' && f.hellingshoek >= 15);
+      const dakPlat = faces.filter(f => f.type === 'RoofSurface' && f.hellingshoek < 15);
+      const wanden = faces.filter(f => f.type === 'WallSurface');
+      const grond = faces.filter(f => f.type === 'GroundSurface');
+
+      const alleGeometrieen = [];
+      [
+        [dakSchuin, DAKPAN_KLEUR],
+        [dakPlat, PLAT_DAK_KLEUR],
+        [wanden, WAND_KLEUR],
+        [grond, GROND_KLEUR],
+      ].forEach(([groep, kleur]) => {
+        const geom = buildFaceGroupGeometry(groep, center);
+        if (!geom) return;
+        const mat = new THREE.MeshLambertMaterial({ color: kleur, side: THREE.DoubleSide });
+        scene.add(new THREE.Mesh(geom, mat));
+        alleGeometrieen.push(geom);
+      });
+
+      // Wireframe-rand: op de samengevoegde geometrie, zodat randen tussen dak/wand/grond ook
+      // meetellen. Naburige driehoeken van hetzelfde vlak zijn vlak (hoek 0°) en vallen weg.
+      if (alleGeometrieen.length) {
+        const merged = mergeBufferGeometries(alleGeometrieen);
+        const edges = new THREE.EdgesGeometry(merged, 1);
+        const lijnen = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x263640, linewidth: 1 }));
+        scene.add(lijnen);
+      }
+
+      // NAP-referentievlak (0 m t.o.v. Amsterdams Peil): een heel transparant lichtblauw vlak op
+      // zeeniveau, zodat in één oogopslag te zien is hoe hoog het pand boven (of onder, bijv. in
+      // een polder) NAP ligt. RD z=0 komt overeen met three.js Y = -center.z (naarThreeCoord).
+      const napY = -center.z;
+      const napGrootte = afmeting * 1.3;
+
+      const napVlak = new THREE.Mesh(
+        new THREE.PlaneGeometry(napGrootte, napGrootte),
+        new THREE.MeshBasicMaterial({ color: 0x64b5f6, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false })
+      );
+      napVlak.rotation.x = -Math.PI / 2;
+      napVlak.position.set(0, napY, 0);
+      scene.add(napVlak);
+
+      // Dun randje voor houvast: het vlak zelf is zo transparant dat de rand anders zoek is.
+      const napRandPunten = [
+        new THREE.Vector3(-napGrootte / 2, napY, -napGrootte / 2),
+        new THREE.Vector3(napGrootte / 2, napY, -napGrootte / 2),
+        new THREE.Vector3(napGrootte / 2, napY, napGrootte / 2),
+        new THREE.Vector3(-napGrootte / 2, napY, napGrootte / 2),
+      ];
+      const napRandGeom = new THREE.BufferGeometry().setFromPoints(napRandPunten);
+      scene.add(new THREE.LineLoop(napRandGeom, new THREE.LineBasicMaterial({ color: 0x2196f3, transparent: true, opacity: 0.5 })));
+
+      const napLabelDiv = document.createElement('div');
+      napLabelDiv.textContent = 'NAP (0 m)';
+      napLabelDiv.style.cssText = 'background:#2196f3;color:#fff;font-size:0.65rem;font-weight:600;'
+        + 'padding:0.1rem 0.35rem;border-radius:3px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.3);';
+      const napLabel = new CSS2DObject(napLabelDiv);
+      napLabel.position.set(napGrootte / 2, napY, -napGrootte / 2);
+      scene.add(napLabel);
+
+      // Labels met oppervlakte per dakvlak (op het zwaartepunt van elk vlak). Op een eigen
+      // camera-layer gezet zodat ze in één keer aan/uit te zetten zijn (bij een VvE met veel
+      // panden al snel te veel) - CSS2DRenderer kijkt namelijk niet naar object.visible/Group.visible,
+      // alleen naar object.layers.test(camera.layers), dus dat is de enige manier om dit te sturen.
+      const DAK_LABEL_LAAG = 1;
+      // Bij veel dakvlakken (VvE) is het al snel te druk - dan de labels standaard verborgen,
+      // net als de dakdelenlijst hierboven.
+      const aantalDakvlakken = dakSchuin.length + dakPlat.length;
+      let dakLabelsZichtbaar = aantalDakvlakken <= 6;
+      if (dakLabelsZichtbaar) camera.layers.enable(DAK_LABEL_LAAG); else camera.layers.disable(DAK_LABEL_LAAG);
+      setKnopLabel(labelToggleBtn, window.ICONS.tag, dakLabelsZichtbaar ? 'Labels verbergen' : 'Labels tonen');
+      [...dakSchuin, ...dakPlat].forEach(f => {
+        const c = f.punten.reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]], [0, 0, 0])
+          .map(s => s / f.punten.length);
+        const [lx, ly, lz] = naarThreeCoord(c, center);
+
+        const kleurHex = `#${(f.hellingshoek < 15 ? PLAT_DAK_KLEUR : DAKPAN_KLEUR).toString(16).padStart(6, '0')}`;
+        const div = document.createElement('div');
+        div.textContent = `${f.oppervlak.toLocaleString('nl-NL', { maximumFractionDigits: 1 })} m²`;
+        div.style.cssText = `background:${kleurHex};color:#fff;font-size:0.7rem;font-weight:600;`
+          + 'padding:0.15rem 0.4rem;border-radius:3px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.3);';
+
+        const label = new CSS2DObject(div);
+        label.position.set(lx, ly, lz);
+        label.layers.set(DAK_LABEL_LAAG);
+        scene.add(label);
+      });
+
+      labelToggleBtn.onclick = () => {
+        dakLabelsZichtbaar = !dakLabelsZichtbaar;
+        if (dakLabelsZichtbaar) camera.layers.enable(DAK_LABEL_LAAG); else camera.layers.disable(DAK_LABEL_LAAG);
+        setKnopLabel(labelToggleBtn, window.ICONS.tag, dakLabelsZichtbaar ? 'Labels verbergen' : 'Labels tonen');
+      };
+
+      // Let op: aan renderer.domElement (het WebGL-canvas) koppelen, niet aan
+      // labelRenderer.domElement - die heeft pointer-events:none (zodat labels de muis niet
+      // blokkeren) en zou dus nooit sleep-events ontvangen als OrbitControls daaraan hangt.
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0, 0);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.minDistance = afmeting * 0.6;
+      controls.maxDistance = afmeting * 6;
+      controls.autoRotate = true;
+      controls.autoRotateSpeed = 1.2;
+      controls.update();
+
+      rotatieToggleBtn.onclick = () => {
+        controls.autoRotate = !controls.autoRotate;
+        setKnopLabel(rotatieToggleBtn, window.ICONS.rotate, controls.autoRotate ? 'Rotatie stoppen' : 'Rotatie hervatten');
+      };
+
+      let running = true;
+      function animate() {
+        if (!running) return;
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+        labelRenderer.render(scene, camera);
+      }
+      animate();
+
+      const resizeObserver = new ResizeObserver(() => {
+        const w = container.clientWidth || width;
+        const h = container.clientHeight || height;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+        labelRenderer.setSize(w, h);
+      });
+      resizeObserver.observe(container);
+
+      currentViewer = {
+        container,
+        stop: () => {
+          running = false;
+          resizeObserver.disconnect();
+          controls.dispose();
+          renderer.dispose();
+        },
+      };
+    };
+
+    // Kleine eigen implementatie i.p.v. de BufferGeometryUtils-addon (scheelt een extra import):
+    // voegt een lijst gelijksoortige BufferGeometry-objecten (alleen 'position') samen tot één.
+    function mergeBufferGeometries(geometries) {
+      let total = 0;
+      geometries.forEach(g => { total += g.attributes.position.count; });
+      const merged = new Float32Array(total * 3);
+      let offset = 0;
+      geometries.forEach(g => {
+        const arr = g.attributes.position.array;
+        merged.set(arr, offset);
+        offset += arr.length;
+      });
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(merged, 3));
+      return geom;
+    }
+  </script>
+</body>
+</html>
