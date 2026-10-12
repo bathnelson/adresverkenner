@@ -377,6 +377,12 @@
     .badge-blue { background: var(--status-neutral-bg); color: var(--status-neutral-fg); }
     .badge-orange { background: var(--status-warn-bg); color: var(--status-warn-fg); }
 
+    .versie-regel {
+      text-align: center;
+      font-size: 0.7rem;
+      color: #b5bcc0;
+      padding: 0.5rem 1rem 1.25rem;
+    }
     .source-link {
       margin-top: 1rem;
       text-align: right;
@@ -766,7 +772,7 @@
 
     @media print {
       .sticky-header, .loading, .error,
-      .source-link, .info-link, body::after { display: none !important; }
+      .source-link, .info-link, .versie-regel, body::after { display: none !important; }
       body { background: #fff; }
     }
 
@@ -899,8 +905,11 @@
     </div>
   </div>
 
+  <div class="versie-regel" id="app-versie"></div>
 
   <script>
+    // Wordt bij elke commit automatisch bijgewerkt door .git/hooks/pre-commit (volgnummer + tijd).
+    const APP_VERSIE = 'v3 · 2026-10-12 18:18';
     const LOCATIESERVER = 'https://api.pdok.nl/bzk/locatieserver/search/v3_1';
     const BAG_API = 'https://api.pdok.nl/kadaster/bag/ogc/v2';
     const CBS_API = 'https://opendata.cbs.nl/ODataApi/OData/85984NED';
@@ -954,6 +963,13 @@
       document.title = pageTitle;
       const pageTitleEl = document.querySelector('.page-title');
       if (pageTitleEl) pageTitleEl.textContent = pageTitle;
+    }
+
+    console.info('Adresverkenner versie ' + APP_VERSIE);
+    const versieEl = document.getElementById('app-versie');
+    if (versieEl) {
+      if (EMBEDDED_MODE) versieEl.style.display = 'none';
+      else versieEl.textContent = 'Versie ' + APP_VERSIE;
     }
 
     if (EMBEDDED_MODE) {
