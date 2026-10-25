@@ -552,6 +552,13 @@
 
     .ep-info-btn:hover { color: #263640; }
 
+    .ep-label-uitleg {
+      margin-top: 0.3rem;
+      font-size: 0.8rem;
+      line-height: 1.45;
+      color: #6f7071;
+    }
+
     .ep-info-popup {
       margin-top: 0.5rem;
       background: #f5f8f9;
@@ -1945,13 +1952,60 @@
       }
     }
 
+    // Uitleg per labelklasse. Grenzen gelden voor woningen met een label volgens NTA 8800
+    // (vanaf 1 januari 2021): primair fossiel energiegebruik (EP2) in kWh per m² per jaar.
+    const ENERGIELABEL_UITLEG = {
+      'A+++++': { tekst: 'Uitzonderlijk zuinig: de woning levert meer energie op dan ze verbruikt.', ep2: null },
+      'A++++': { tekst: 'Uitzonderlijk zuinig: per saldo energieneutraal of energieleverend.', ep2: 'maximaal 0' },
+      'A+++': { tekst: 'Zeer zuinig, vrijwel energieneutraal.', ep2: '0 tot 50' },
+      'A++': { tekst: 'Zeer zuinig.', ep2: '50 tot 75' },
+      'A+': { tekst: 'Zeer zuinig.', ep2: '75 tot 105' },
+      'A': { tekst: 'Zuinig: goed geïsoleerd met een efficiënte installatie.', ep2: '105 tot 160' },
+      'B': { tekst: 'Redelijk zuinig.', ep2: '160 tot 190' },
+      'C': { tekst: 'Gemiddeld; met een paar maatregelen is nog winst te halen.', ep2: '190 tot 250' },
+      'D': { tekst: 'Matig zuinig; isoleren loont meestal.', ep2: '250 tot 290' },
+      'E': { tekst: 'Onzuinig.', ep2: '290 tot 335' },
+      'F': { tekst: 'Zeer onzuinig.', ep2: '335 tot 380' },
+      'G': { tekst: 'Zeer onzuinig: het hoogste energiegebruik.', ep2: 'meer dan 380' },
+    };
+
+    function energielabelKorteUitleg(label) {
+      const u = ENERGIELABEL_UITLEG[label];
+      if (!u) return '';
+      return u.ep2 ? `${u.tekst} Bij woningen: ${u.ep2} kWh fossiele energie per m² per jaar.` : u.tekst;
+    }
+
+    // Uitgebreide uitleg onder het label van het gezochte adres. Labels van vóór 2021 zijn op
+    // een andere manier berekend (energie-index), dan gelden de kWh-grenzen niet.
+    function energielabelUitlegHtml(label, info) {
+      const u = ENERGIELABEL_UITLEG[label];
+      if (!u) return '';
+      const regDatum = info?.Registratiedatum || info?.registratiedatum || info?.Opnamedatum || info?.opnamedatum || '';
+      const methode = String(info?.Berekeningstype || info?.berekeningstype || '');
+      const oudLabel = !methode.includes('NTA') && regDatum && new Date(regDatum) < new Date('2021-01-01');
+      const ep2 = info?.Primaire_fossiele_energie ?? info?.EP2Waarde ?? info?.ep2Waarde;
+      let html = `${u.tekst} `;
+      if (oudLabel) {
+        html += 'Dit label is vóór 2021 vastgesteld met de oudere rekenmethode, en daardoor niet één op één te vergelijken met nieuwe labels.';
+      } else if (u.ep2) {
+        html += `Bij woningen hoort label ${label} bij een berekend fossiel energiegebruik van ${u.ep2} kWh per m² per jaar`;
+        if (typeof ep2 === 'number') html += `; voor deze woning is dat ${ep2.toLocaleString('nl-NL', { maximumFractionDigits: 1 })} kWh`;
+        html += '.';
+      }
+      html += ' Het label is een berekening op basis van isolatie en installaties, niet het werkelijke verbruik van de bewoners. De schaal loopt van A++++ (zuinigst) tot G (minst zuinig).';
+      return `<div class="ep-label-uitleg">${html}</div>`;
+    }
+
     function energielabelBadgeHtml(label) {
       if (!label) return '<span style="color:#999;font-size:0.85rem;">Geen label</span>';
+      const uitleg = energielabelKorteUitleg(label);
+      const titleAttr = uitleg ? ` title="Energielabel ${label}: ${uitleg}"` : '';
+      const cursor = uitleg ? 'cursor:help;' : '';
       const colors = {'A+++++':'#009036','A++++':'#009036','A+++':'#009036','A++':'#009036','A+':'#009036','A':'#009036','B':'#55ab26','C':'#c8d100','D':'#fff200','E':'#f7a600','F':'#ed7d00','G':'#e30613'};
       const textColors = {'C':'#333','D':'#333'};
       const bg = colors[label] || '#999';
       const fg = textColors[label] || '#fff';
-      return `<span style="display:inline-block;background:${bg};color:${fg};padding:0.15rem 0.5rem;border-radius:3px;font-weight:700;font-size:0.85rem;">${label}</span>`;
+      return `<span${titleAttr} style="${cursor}display:inline-block;background:${bg};color:${fg};padding:0.15rem 0.5rem;border-radius:3px;font-weight:700;font-size:0.85rem;">${label}</span>`;
     }
 
     // EP-Online geeft de positie van een appartement in het gebouw mee via "Gebouwsubtype",
@@ -3215,6 +3269,7 @@
         const details = [gt, gk].filter(Boolean);
         if (details.length) labelCel += ` <span style="font-size:0.75rem;color:#888;margin-left:0.4rem;">${details.join(' · ')}</span>`;
         labelCel += ` <button class="ep-info-btn" onclick="toggleEpInfo()" title="EP-Online details">ⓘ</button>`;
+        labelCel += energielabelUitlegHtml(currentEnergielabel, currentEnergielabelInfo);
         labelCel += `<div id="ep-info-popup" class="ep-info-popup" style="display:none;"></div>`;
         energieRows += kenmerkenRij('Energielabel', labelCel);
       } else if (currentEnergielabelStatus === 'not_found') {
