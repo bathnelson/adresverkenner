@@ -1975,10 +1975,11 @@
       'G': 'Het minst zuinig. De woning verliest veel warmte.',
     };
     const ENERGIELABEL_SCHAAL = 'Het label loopt van A++++ (heel zuinig) tot G (heel onzuinig).';
+    const ENERGIELABEL_MEETELT = 'Het telt alleen verwarming, warm water en ventilatie mee, niet koken, verlichting of apparaten.';
 
     function energielabelKorteUitleg(label) {
       const tekst = ENERGIELABEL_UITLEG[label];
-      return tekst ? `${tekst} ${ENERGIELABEL_SCHAAL}` : '';
+      return tekst ? `${tekst} ${ENERGIELABEL_SCHAAL} ${ENERGIELABEL_MEETELT}` : '';
     }
 
     // Uitleg onder het label van het gezochte adres. Het EP2-getal (kWh per m² per jaar)
@@ -1997,7 +1998,9 @@
         html += ` Deze woning heeft volgens de berekening per jaar ongeveer evenveel energie nodig als er in ${m3.toLocaleString('nl-NL')} m³ gas zit.`;
       }
       if (oudLabel) html += ' Dit label is van vóór 2021 en op een oudere manier berekend.';
-      html += ' Het label is een schatting op basis van isolatie en verwarming. Wat de bewoners echt verbruiken, kan anders zijn.';
+      html += ' Let op: het label telt alleen energie voor verwarming, warm water en ventilatie, gerekend met een standaardgezin.'
+        + ' Koken, verlichting en apparaten (zoals koelkast, wasmachine of laadpaal) tellen niet mee.'
+        + ' Het zegt dus vooral hoe goed de woning is geïsoleerd en verwarmd, niet wat je energierekening wordt.';
       return `<div class="ep-label-uitleg">${html}</div>`;
     }
 
