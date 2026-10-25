@@ -552,6 +552,13 @@
 
     .ep-info-btn:hover { color: #263640; }
 
+    .ep-label-uitleg {
+      margin-top: 0.3rem;
+      font-size: 0.8rem;
+      line-height: 1.45;
+      color: #6f7071;
+    }
+
     .ep-info-popup {
       margin-top: 0.5rem;
       background: #f5f8f9;
@@ -584,6 +591,13 @@
     .ep-info-popup td:last-child {
       font-weight: 500;
       word-break: break-word;
+    }
+
+    .ep-veld-uitleg {
+      font-weight: 400;
+      font-size: 0.72rem;
+      color: #888;
+      margin-top: 0.1rem;
     }
 
     /* --- Compact table (woning + warmte) --- */
@@ -1945,13 +1959,61 @@
       }
     }
 
+    // Uitleg per labelklasse in eenvoudige taal, voor mensen zonder kennis van energielabels.
+    const ENERGIELABEL_UITLEG = {
+      'A+++++': 'Het zuinigst mogelijk: de woning wekt meer energie op dan ze gebruikt.',
+      'A++++': 'Het zuinigst mogelijk: de woning wekt ongeveer evenveel energie op als ze gebruikt.',
+      'A+++': 'Heel zuinig.',
+      'A++': 'Heel zuinig.',
+      'A+': 'Heel zuinig.',
+      'A': 'Zuinig. De woning is goed geïsoleerd.',
+      'B': 'Vrij zuinig.',
+      'C': 'Gemiddeld. Met bijvoorbeeld extra isolatie valt nog te besparen.',
+      'D': 'Niet zo zuinig. Isoleren loont meestal.',
+      'E': 'Onzuinig. De woning verliest veel warmte.',
+      'F': 'Erg onzuinig.',
+      'G': 'Het minst zuinig. De woning verliest veel warmte.',
+    };
+    const ENERGIELABEL_SCHAAL = 'Het label loopt van A++++ (heel zuinig) tot G (heel onzuinig).';
+    const ENERGIELABEL_MEETELT = 'Het telt alleen verwarming, warm water en ventilatie mee, niet koken, verlichting of apparaten.';
+
+    function energielabelKorteUitleg(label) {
+      const tekst = ENERGIELABEL_UITLEG[label];
+      return tekst ? `${tekst} ${ENERGIELABEL_SCHAAL} ${ENERGIELABEL_MEETELT}` : '';
+    }
+
+    // Uitleg onder het label van het gezochte adres. Het EP2-getal (kWh per m² per jaar)
+    // zegt de meeste mensen niets; daarom rekenen we het om naar de hele woning en naar
+    // m³ aardgas (1 m³ ≈ 9,77 kWh), een maat die mensen kennen van hun energierekening.
+    function energielabelUitlegHtml(label, info, woonoppervlak) {
+      const tekst = ENERGIELABEL_UITLEG[label];
+      if (!tekst) return '';
+      const regDatum = info?.Registratiedatum || info?.registratiedatum || info?.Opnamedatum || info?.opnamedatum || '';
+      const methode = String(info?.Berekeningstype || info?.berekeningstype || '');
+      const oudLabel = !methode.includes('NTA') && regDatum && new Date(regDatum) < new Date('2021-01-01');
+      const ep2 = info?.Primaire_fossiele_energie ?? info?.EP2Waarde ?? info?.ep2Waarde;
+      let html = `${tekst} ${ENERGIELABEL_SCHAAL}`;
+      if (!oudLabel && typeof ep2 === 'number' && ep2 > 0 && woonoppervlak > 0) {
+        const m3 = Math.round(ep2 * woonoppervlak / 9.77 / 50) * 50;
+        html += ` Deze woning heeft volgens de berekening per jaar ongeveer evenveel energie nodig als er in ${m3.toLocaleString('nl-NL')} m³ gas zit.`;
+      }
+      if (oudLabel) html += ' Dit label is van vóór 2021 en op een oudere manier berekend.';
+      html += ' Let op: het label telt alleen energie voor verwarming, warm water en ventilatie, gerekend met een standaardgezin.'
+        + ' Koken, verlichting en apparaten (zoals koelkast, wasmachine of laadpaal) tellen niet mee.'
+        + ' Het zegt dus vooral hoe goed de woning is geïsoleerd en verwarmd, niet wat je energierekening wordt.';
+      return `<div class="ep-label-uitleg">${html}</div>`;
+    }
+
     function energielabelBadgeHtml(label) {
       if (!label) return '<span style="color:#999;font-size:0.85rem;">Geen label</span>';
+      const uitleg = energielabelKorteUitleg(label);
+      const titleAttr = uitleg ? ` title="Energielabel ${label}: ${uitleg}"` : '';
+      const cursor = uitleg ? 'cursor:help;' : '';
       const colors = {'A+++++':'#009036','A++++':'#009036','A+++':'#009036','A++':'#009036','A+':'#009036','A':'#009036','B':'#55ab26','C':'#c8d100','D':'#fff200','E':'#f7a600','F':'#ed7d00','G':'#e30613'};
       const textColors = {'C':'#333','D':'#333'};
       const bg = colors[label] || '#999';
       const fg = textColors[label] || '#fff';
-      return `<span style="display:inline-block;background:${bg};color:${fg};padding:0.15rem 0.5rem;border-radius:3px;font-weight:700;font-size:0.85rem;">${label}</span>`;
+      return `<span${titleAttr} style="${cursor}display:inline-block;background:${bg};color:${fg};padding:0.15rem 0.5rem;border-radius:3px;font-weight:700;font-size:0.85rem;">${label}</span>`;
     }
 
     // EP-Online geeft de positie van een appartement in het gebouw mee via "Gebouwsubtype",
@@ -2959,6 +3021,54 @@
       }
     }
 
+    // Uitleg in gewone taal bij de vaktermen uit EP-Online. Sleutels zonder hoofdletters en
+    // underscores, zodat zowel "EnergieIndex" als "Energie_index" of "energieindex" matcht.
+    const EP_VELD_UITLEG = {
+      labelletter: 'De letter van het label. A++++ is heel zuinig, G heel onzuinig.',
+      energieklasse: 'De letter van het label. A++++ is heel zuinig, G heel onzuinig.',
+      energieindex: 'Cijfer waarmee oude labels (van vóór 2021) werden berekend. Hoe lager, hoe zuiniger.',
+      energieindexmetemgforfaitair: 'Hetzelfde cijfer, met een vaste schatting voor apparaten.',
+      ep2waarde: 'Hoeveel energie de woning per m² per jaar nodig heeft. Dit getal bepaalt de letter. Hoe lager, hoe zuiniger.',
+      primairefossieleenergie: 'Hoeveel energie de woning per m² per jaar nodig heeft. Dit getal bepaalt de letter. Hoe lager, hoe zuiniger.',
+      primairefossieleenergieemgforfaitair: 'Hetzelfde getal, met een vaste schatting voor apparaten.',
+      energiebehoefte: 'Hoeveel energie nodig is om de woning warm te houden. Zegt vooral iets over de isolatie. Lager is beter.',
+      warmtebehoefte: 'Hoeveel warmte de woning nodig heeft. Lager is beter geïsoleerd.',
+      aandeelhernieuwbareenergie: 'Hoeveel procent van de energie duurzaam is, bijvoorbeeld van zonnepanelen of een warmtepomp.',
+      aandeelhernieuwbareenergieemgforfaitair: 'Hetzelfde percentage, met een vaste schatting voor apparaten.',
+      temperatuuroverschrijding: 'Kans dat het in de zomer te warm wordt binnen. Lager is beter.',
+      berekendeenergieverbruik: 'Het geschatte energieverbruik. Wat je echt verbruikt, hangt af van hoe je woont.',
+      gebouwklasse: 'Of het een woning is of een ander gebouw, zoals een kantoor of winkel.',
+      gebouwtype: 'Het soort woning, zoals een rijtjeshuis, hoekhuis of appartement.',
+      gebouwsubtype: 'Waar de woning in het gebouw ligt, bijvoorbeeld beneden, in het midden of bovenin.',
+      berekeningstype: 'Hoe het label is berekend. Sinds 2021 gebruikt iedereen dezelfde nieuwe methode (NTA 8800).',
+      isvereenvoudigd: 'Ja: het label is op een eenvoudige manier gemaakt, vaak zonder bezoek van een adviseur.',
+      opbasisvanreferentiegebouw: 'Ja: het label is overgenomen van een vergelijkbare woning.',
+      isopbasisvanreferentiegebouw: 'Ja: het label is overgenomen van een vergelijkbare woning.',
+      opnamedatum: 'Wanneer de woning is bekeken.',
+      registratiedatum: 'Wanneer het label is vastgelegd. Een label is 10 jaar geldig.',
+      geldigheid: 'Tot wanneer het label geldig is.',
+      datumgeldigheid: 'Tot wanneer het label geldig is.',
+      geldigtot: 'Tot wanneer het label geldig is.',
+      status: 'Of het label nog geldig is.',
+      afmeldnummer: 'Het officiële nummer van het label.',
+      gebruiksoppervlaktethermischezone: 'Hoeveel vloer er in de berekening is meegenomen.',
+      bagverblijfsobjectid: 'Het vaste nummer van deze woning in de landelijke adressenlijst.',
+      pandid: 'Het vaste nummer van het gebouw in de landelijke gebouwenlijst.',
+      bagpandid: 'Het vaste nummer van het gebouw in de landelijke gebouwenlijst.',
+      detailaanduidingtype: 'Extra aanduiding als een adres uit meerdere ruimtes bestaat.',
+      sbicode: 'Code voor het soort bedrijf in het gebouw (niet bij woningen).',
+    };
+
+    function epVeldUitleg(key) {
+      return EP_VELD_UITLEG[String(key).toLowerCase().replace(/[^a-z0-9]/g, '')] || '';
+    }
+
+    function gebouwklasseLeesbaar(gk) {
+      if (gk === 'W') return 'woning';
+      if (gk === 'U') return 'utiliteitsgebouw';
+      return gk;
+    }
+
     function toggleEpInfo() {
       const popup = document.getElementById('ep-info-popup');
       if (!popup) return;
@@ -2973,12 +3083,12 @@
         Energieindex: 'Energie-index', energieindex: 'Energie-index',
         Gebouwklasse: 'Gebouwklasse', gebouwklasse: 'Gebouwklasse',
         Gebouwtype: 'Gebouwtype', gebouwtype: 'Gebouwtype',
-        Gebouwsubtype: 'Gebouwsubtype', gebouwsubtype: 'Gebouwsubtype',
+        Gebouwsubtype: 'Ligging in het gebouw', gebouwsubtype: 'Ligging in het gebouw',
         BerekendeEnergieverbruik: 'Berekend energieverbruik', berekendeEnergieverbruik: 'Berekend energieverbruik',
-        EP2Waarde: 'EP2 waarde', ep2Waarde: 'EP2 waarde',
+        EP2Waarde: 'Energiegebruik per m² per jaar', ep2Waarde: 'Energiegebruik per m² per jaar',
         Registratiedatum: 'Registratiedatum', registratiedatum: 'Registratiedatum',
         Opnamedatum: 'Opnamedatum', opnamedatum: 'Opnamedatum',
-        Berekeningstype: 'Berekeningstype', berekeningstype: 'Berekeningstype',
+        Berekeningstype: 'Rekenmethode', berekeningstype: 'Rekenmethode',
         Status: 'Status', status: 'Status',
         IsVereenvoudigd: 'Vereenvoudigd', isVereenvoudigd: 'Vereenvoudigd',
         Geldigheid: 'Geldigheid', geldigheid: 'Geldigheid',
@@ -2990,6 +3100,21 @@
         DetailaanduidingType: 'Detailaanduiding type',
         Bagverblijfsobjectid: 'BAG verblijfsobject ID', bagVerblijfsobjectId: 'BAG verblijfsobject ID',
         PandId: 'Pand ID',
+        EnergieIndex: 'Energie-index', Energie_index: 'Energie-index',
+        EnergieIndex_met_EMG_forfaitair: 'Energie-index (met apparaten)',
+        Primaire_fossiele_energie: 'Energiegebruik per m² per jaar',
+        Primaire_fossiele_energie_EMG_forfaitair: 'Energiegebruik (met apparaten)',
+        Energiebehoefte: 'Energie nodig voor warmte',
+        Warmtebehoefte: 'Warmte nodig',
+        Aandeel_hernieuwbare_energie: 'Aandeel duurzame energie (%)',
+        Aandeel_hernieuwbare_energie_EMG_forfaitair: 'Duurzame energie (met apparaten)',
+        Temperatuuroverschrijding: 'Kans op oververhitting',
+        Gebruiksoppervlakte_thermische_zone: 'Berekende vloeroppervlakte',
+        Op_basis_van_referentiegebouw: 'Overgenomen van vergelijkbare woning',
+        Is_op_basis_van_referentie_gebouw: 'Overgenomen van vergelijkbare woning',
+        Datum_geldigheid: 'Geldig tot', Geldig_tot: 'Geldig tot',
+        BAGPandID: 'Pand ID', BAGVerblijfsobjectID: 'BAG verblijfsobject ID',
+        SBIcode: 'SBI-code',
       };
       let html = '<table>';
       for (const [k, v] of Object.entries(currentEnergielabelInfo)) {
@@ -2998,7 +3123,9 @@
         let val = v;
         if (typeof val === 'boolean') val = val ? 'Ja' : 'Nee';
         if (typeof val === 'number') val = val.toLocaleString('nl-NL');
-        html += `<tr><td>${name}</td><td>${val}</td></tr>`;
+        if (/klasse$/i.test(k) && /gebouw/i.test(k)) val = `${val} (${gebouwklasseLeesbaar(val)})`;
+        const uitleg = epVeldUitleg(k);
+        html += `<tr><td>${name}</td><td>${val}${uitleg ? `<div class="ep-veld-uitleg">${uitleg}</div>` : ''}</td></tr>`;
       }
       html += '</table>';
       html += `<p style="margin-top:0.5rem;font-size:0.7rem;color:#aaa;">Bron: EP-Online (RVO)</p>`;
@@ -3211,10 +3338,11 @@
       if (currentEnergielabel) {
         let labelCel = energielabelBadgeHtml(currentEnergielabel);
         const gt = currentEnergielabelInfo?.Gebouwtype || currentEnergielabelInfo?.gebouwtype || '';
-        const gk = currentEnergielabelInfo?.Gebouwklasse || currentEnergielabelInfo?.gebouwklasse || '';
+        const gk = gebouwklasseLeesbaar(currentEnergielabelInfo?.Gebouwklasse || currentEnergielabelInfo?.gebouwklasse || '');
         const details = [gt, gk].filter(Boolean);
         if (details.length) labelCel += ` <span style="font-size:0.75rem;color:#888;margin-left:0.4rem;">${details.join(' · ')}</span>`;
-        labelCel += ` <button class="ep-info-btn" onclick="toggleEpInfo()" title="EP-Online details">ⓘ</button>`;
+        labelCel += ` <button class="ep-info-btn" onclick="toggleEpInfo()" title="Alle gegevens van het energielabel, met uitleg">ⓘ</button>`;
+        labelCel += energielabelUitlegHtml(currentEnergielabel, currentEnergielabelInfo, bagProps?.oppervlakte);
         labelCel += `<div id="ep-info-popup" class="ep-info-popup" style="display:none;"></div>`;
         energieRows += kenmerkenRij('Energielabel', labelCel);
       } else if (currentEnergielabelStatus === 'not_found') {
