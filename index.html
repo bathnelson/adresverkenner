@@ -1959,57 +1959,45 @@
       }
     }
 
-    // Uitleg per labelklasse. Grenzen gelden voor woningen met een label volgens NTA 8800
-    // (vanaf 1 januari 2021): primair fossiel energiegebruik (EP2) in kWh per m² per jaar.
+    // Uitleg per labelklasse in eenvoudige taal, voor mensen zonder kennis van energielabels.
     const ENERGIELABEL_UITLEG = {
-      'A+++++': { tekst: 'Uitzonderlijk zuinig: de woning levert meer energie op dan ze verbruikt.', ep2: null },
-      'A++++': { tekst: 'Uitzonderlijk zuinig: per saldo energieneutraal of energieleverend.', ep2: 'maximaal 0' },
-      'A+++': { tekst: 'Zeer zuinig, vrijwel energieneutraal.', ep2: '0 tot 50' },
-      'A++': { tekst: 'Zeer zuinig.', ep2: '50 tot 75' },
-      'A+': { tekst: 'Zeer zuinig.', ep2: '75 tot 105' },
-      'A': { tekst: 'Zuinig: goed geïsoleerd met een efficiënte installatie.', ep2: '105 tot 160' },
-      'B': { tekst: 'Redelijk zuinig.', ep2: '160 tot 190' },
-      'C': { tekst: 'Gemiddeld; met een paar maatregelen is nog winst te halen.', ep2: '190 tot 250' },
-      'D': { tekst: 'Matig zuinig; isoleren loont meestal.', ep2: '250 tot 290' },
-      'E': { tekst: 'Onzuinig.', ep2: '290 tot 335' },
-      'F': { tekst: 'Zeer onzuinig.', ep2: '335 tot 380' },
-      'G': { tekst: 'Zeer onzuinig: het hoogste energiegebruik.', ep2: 'meer dan 380' },
+      'A+++++': 'Het zuinigst mogelijk: de woning wekt meer energie op dan ze gebruikt.',
+      'A++++': 'Het zuinigst mogelijk: de woning wekt ongeveer evenveel energie op als ze gebruikt.',
+      'A+++': 'Heel zuinig.',
+      'A++': 'Heel zuinig.',
+      'A+': 'Heel zuinig.',
+      'A': 'Zuinig. De woning is goed geïsoleerd.',
+      'B': 'Vrij zuinig.',
+      'C': 'Gemiddeld. Met bijvoorbeeld extra isolatie valt nog te besparen.',
+      'D': 'Niet zo zuinig. Isoleren loont meestal.',
+      'E': 'Onzuinig. De woning verliest veel warmte.',
+      'F': 'Erg onzuinig.',
+      'G': 'Het minst zuinig. De woning verliest veel warmte.',
     };
+    const ENERGIELABEL_SCHAAL = 'Het label loopt van A++++ (heel zuinig) tot G (heel onzuinig).';
 
     function energielabelKorteUitleg(label) {
-      const u = ENERGIELABEL_UITLEG[label];
-      if (!u) return '';
-      return u.ep2 ? `${u.tekst} Een woning met dit label gebruikt volgens de berekening ${u.ep2} kWh energie per vierkante meter vloer per jaar.` : u.tekst;
+      const tekst = ENERGIELABEL_UITLEG[label];
+      return tekst ? `${tekst} ${ENERGIELABEL_SCHAAL}` : '';
     }
 
-    // Uitgebreide uitleg onder het label van het gezochte adres. Labels van vóór 2021 zijn op
-    // een andere manier berekend (energie-index), dan gelden de kWh-grenzen niet.
-    // Het voorbeeld rekent het EP2-getal om naar de hele woning en naar m³ aardgas
-    // (1 m³ aardgas ≈ 9,77 kWh), omdat "kWh per m²" voor de meeste mensen weinig zegt.
+    // Uitleg onder het label van het gezochte adres. Het EP2-getal (kWh per m² per jaar)
+    // zegt de meeste mensen niets; daarom rekenen we het om naar de hele woning en naar
+    // m³ aardgas (1 m³ ≈ 9,77 kWh), een maat die mensen kennen van hun energierekening.
     function energielabelUitlegHtml(label, info, woonoppervlak) {
-      const u = ENERGIELABEL_UITLEG[label];
-      if (!u) return '';
+      const tekst = ENERGIELABEL_UITLEG[label];
+      if (!tekst) return '';
       const regDatum = info?.Registratiedatum || info?.registratiedatum || info?.Opnamedatum || info?.opnamedatum || '';
       const methode = String(info?.Berekeningstype || info?.berekeningstype || '');
       const oudLabel = !methode.includes('NTA') && regDatum && new Date(regDatum) < new Date('2021-01-01');
       const ep2 = info?.Primaire_fossiele_energie ?? info?.EP2Waarde ?? info?.ep2Waarde;
-      const fmt = (n) => Math.round(n).toLocaleString('nl-NL');
-      let html = `${u.tekst} `;
-      if (oudLabel) {
-        html += 'Dit label is vóór 2021 vastgesteld met de oudere rekenmethode, en daardoor niet één op één te vergelijken met nieuwe labels.';
-      } else if (u.ep2) {
-        html += `Bij label ${label} gebruikt een woning volgens de berekening ${u.ep2} kWh energie per vierkante meter vloer per jaar. `;
-        html += 'Dat getal zegt hoeveel energie (verwarming, warm water, ventilatie en eventueel koeling) er per m² nodig is, omgerekend naar wat er aan fossiele brandstof voor wordt verbrand. Zelf opgewekte zonnestroom gaat er vanaf. Hoe lager, hoe zuiniger.';
-        if (typeof ep2 === 'number') {
-          html += ` Voor deze woning is het ${fmt(ep2)} kWh per m²`;
-          if (woonoppervlak > 0 && ep2 > 0) {
-            const totaal = ep2 * woonoppervlak;
-            html += `; bij ${woonoppervlak} m² komt dat neer op ongeveer ${fmt(totaal)} kWh per jaar, vergelijkbaar met de energie in zo'n ${fmt(totaal / 9.77)} m³ aardgas`;
-          }
-          html += '.';
-        }
+      let html = `${tekst} ${ENERGIELABEL_SCHAAL}`;
+      if (!oudLabel && typeof ep2 === 'number' && ep2 > 0 && woonoppervlak > 0) {
+        const m3 = Math.round(ep2 * woonoppervlak / 9.77 / 50) * 50;
+        html += ` Deze woning heeft volgens de berekening per jaar ongeveer evenveel energie nodig als er in ${m3.toLocaleString('nl-NL')} m³ gas zit.`;
       }
-      html += ' Het label is een berekening op basis van isolatie en installaties, niet het werkelijke verbruik van de bewoners. De schaal loopt van A++++ (zuinigst) tot G (minst zuinig).';
+      if (oudLabel) html += ' Dit label is van vóór 2021 en op een oudere manier berekend.';
+      html += ' Het label is een schatting op basis van isolatie en verwarming. Wat de bewoners echt verbruiken, kan anders zijn.';
       return `<div class="ep-label-uitleg">${html}</div>`;
     }
 
@@ -3033,39 +3021,39 @@
     // Uitleg in gewone taal bij de vaktermen uit EP-Online. Sleutels zonder hoofdletters en
     // underscores, zodat zowel "EnergieIndex" als "Energie_index" of "energieindex" matcht.
     const EP_VELD_UITLEG = {
-      labelletter: 'De letter op het energielabel: A++++ is het zuinigst, G het minst zuinig.',
-      energieklasse: 'De letter op het energielabel: A++++ is het zuinigst, G het minst zuinig.',
-      energieindex: 'Oude maat (labels van vóór 2021) voor hoe zuinig een woning is. Hoe lager het getal, hoe zuiniger: tot 1,05 was label A, boven 2,90 label G.',
-      energieindexmetemgforfaitair: 'Dezelfde energie-index, maar met een standaardwaarde voor het energiegebruik van apparaten.',
-      ep2waarde: 'Hoeveel fossiele energie de woning volgens de berekening per m² vloer per jaar nodig heeft (in kWh). Dit getal bepaalt de labelletter: hoe lager, hoe zuiniger.',
-      primairefossieleenergie: 'Hoeveel fossiele energie de woning volgens de berekening per m² vloer per jaar nodig heeft (in kWh). Dit getal bepaalt de labelletter: hoe lager, hoe zuiniger.',
-      primairefossieleenergieemgforfaitair: 'Hetzelfde getal, maar met een standaardwaarde voor het energiegebruik van apparaten.',
-      energiebehoefte: 'Hoeveel energie de woning per m² per jaar nodig heeft om warm (of koel) te blijven, los van de verwarmingsinstallatie. Vooral een maat voor de isolatie: lager is beter geïsoleerd.',
-      warmtebehoefte: 'Hoeveel warmte de woning per m² per jaar nodig heeft. Lager betekent beter geïsoleerd.',
-      aandeelhernieuwbareenergie: 'Welk deel van de benodigde energie uit duurzame bronnen komt, zoals zonnepanelen, een warmtepomp of warmtenet.',
-      aandeelhernieuwbareenergieemgforfaitair: 'Hetzelfde aandeel, maar met een standaardwaarde voor het energiegebruik van apparaten.',
-      temperatuuroverschrijding: 'Een maat voor de kans dat het in de zomer te warm wordt binnen. Hoe lager, hoe minder kans op oververhitting.',
-      berekendeenergieverbruik: 'Het energiegebruik dat de berekening voor deze woning verwacht. Het werkelijke verbruik hangt af van de bewoners.',
-      gebouwklasse: 'W = woning, U = utiliteitsgebouw (bijvoorbeeld kantoor, winkel of school).',
-      gebouwtype: 'Het soort gebouw, zoals een tussenwoning, hoekwoning of appartement.',
-      gebouwsubtype: 'Waar de woning in het gebouw ligt, bijvoorbeeld een hoek- of tussenappartement op de begane grond, in het midden of onder het dak.',
-      berekeningstype: 'De rekenmethode van het label. NTA 8800 is de methode sinds 2021; oudere labels zijn op een andere manier berekend.',
-      isvereenvoudigd: 'Ja betekent dat het label met een vereenvoudigde methode is gemaakt, vaak zonder dat een adviseur binnen is geweest.',
-      opbasisvanreferentiegebouw: 'Ja betekent dat het label is overgenomen van een vergelijkbare woning, bijvoorbeeld in hetzelfde nieuwbouwproject.',
-      isopbasisvanreferentiegebouw: 'Ja betekent dat het label is overgenomen van een vergelijkbare woning, bijvoorbeeld in hetzelfde nieuwbouwproject.',
-      opnamedatum: 'De dag waarop de woning is bekeken of de gegevens zijn verzameld.',
-      registratiedatum: 'De dag waarop het label officieel is vastgelegd. Een label is 10 jaar geldig.',
-      geldigheid: 'Tot wanneer het label geldig is. Een label is 10 jaar geldig.',
-      datumgeldigheid: 'Tot wanneer het label geldig is. Een label is 10 jaar geldig.',
-      geldigtot: 'Tot wanneer het label geldig is. Een label is 10 jaar geldig.',
-      status: 'Of het label nog geldt of bijvoorbeeld is vervangen door een nieuwer label.',
-      afmeldnummer: 'Het registratienummer van het label bij de overheid (RVO).',
-      gebruiksoppervlaktethermischezone: 'De vloeroppervlakte die in de berekening is meegenomen, in m².',
-      bagverblijfsobjectid: 'Het unieke nummer van deze woning in de Basisregistratie Adressen en Gebouwen (BAG).',
-      pandid: 'Het unieke nummer van het gebouw in de BAG.',
-      bagpandid: 'Het unieke nummer van het gebouw in de BAG.',
-      detailaanduidingtype: 'Extra aanduiding als een adres meerdere ruimtes heeft.',
-      sbicode: 'Code voor het soort bedrijf of gebruik van het gebouw (alleen bij utiliteitsgebouwen).',
+      labelletter: 'De letter van het label. A++++ is heel zuinig, G heel onzuinig.',
+      energieklasse: 'De letter van het label. A++++ is heel zuinig, G heel onzuinig.',
+      energieindex: 'Cijfer waarmee oude labels (van vóór 2021) werden berekend. Hoe lager, hoe zuiniger.',
+      energieindexmetemgforfaitair: 'Hetzelfde cijfer, met een vaste schatting voor apparaten.',
+      ep2waarde: 'Hoeveel energie de woning per m² per jaar nodig heeft. Dit getal bepaalt de letter. Hoe lager, hoe zuiniger.',
+      primairefossieleenergie: 'Hoeveel energie de woning per m² per jaar nodig heeft. Dit getal bepaalt de letter. Hoe lager, hoe zuiniger.',
+      primairefossieleenergieemgforfaitair: 'Hetzelfde getal, met een vaste schatting voor apparaten.',
+      energiebehoefte: 'Hoeveel energie nodig is om de woning warm te houden. Zegt vooral iets over de isolatie. Lager is beter.',
+      warmtebehoefte: 'Hoeveel warmte de woning nodig heeft. Lager is beter geïsoleerd.',
+      aandeelhernieuwbareenergie: 'Hoeveel procent van de energie duurzaam is, bijvoorbeeld van zonnepanelen of een warmtepomp.',
+      aandeelhernieuwbareenergieemgforfaitair: 'Hetzelfde percentage, met een vaste schatting voor apparaten.',
+      temperatuuroverschrijding: 'Kans dat het in de zomer te warm wordt binnen. Lager is beter.',
+      berekendeenergieverbruik: 'Het geschatte energieverbruik. Wat je echt verbruikt, hangt af van hoe je woont.',
+      gebouwklasse: 'Of het een woning is of een ander gebouw, zoals een kantoor of winkel.',
+      gebouwtype: 'Het soort woning, zoals een rijtjeshuis, hoekhuis of appartement.',
+      gebouwsubtype: 'Waar de woning in het gebouw ligt, bijvoorbeeld beneden, in het midden of bovenin.',
+      berekeningstype: 'Hoe het label is berekend. Sinds 2021 gebruikt iedereen dezelfde nieuwe methode (NTA 8800).',
+      isvereenvoudigd: 'Ja: het label is op een eenvoudige manier gemaakt, vaak zonder bezoek van een adviseur.',
+      opbasisvanreferentiegebouw: 'Ja: het label is overgenomen van een vergelijkbare woning.',
+      isopbasisvanreferentiegebouw: 'Ja: het label is overgenomen van een vergelijkbare woning.',
+      opnamedatum: 'Wanneer de woning is bekeken.',
+      registratiedatum: 'Wanneer het label is vastgelegd. Een label is 10 jaar geldig.',
+      geldigheid: 'Tot wanneer het label geldig is.',
+      datumgeldigheid: 'Tot wanneer het label geldig is.',
+      geldigtot: 'Tot wanneer het label geldig is.',
+      status: 'Of het label nog geldig is.',
+      afmeldnummer: 'Het officiële nummer van het label.',
+      gebruiksoppervlaktethermischezone: 'Hoeveel vloer er in de berekening is meegenomen.',
+      bagverblijfsobjectid: 'Het vaste nummer van deze woning in de landelijke adressenlijst.',
+      pandid: 'Het vaste nummer van het gebouw in de landelijke gebouwenlijst.',
+      bagpandid: 'Het vaste nummer van het gebouw in de landelijke gebouwenlijst.',
+      detailaanduidingtype: 'Extra aanduiding als een adres uit meerdere ruimtes bestaat.',
+      sbicode: 'Code voor het soort bedrijf in het gebouw (niet bij woningen).',
     };
 
     function epVeldUitleg(key) {
@@ -3092,12 +3080,12 @@
         Energieindex: 'Energie-index', energieindex: 'Energie-index',
         Gebouwklasse: 'Gebouwklasse', gebouwklasse: 'Gebouwklasse',
         Gebouwtype: 'Gebouwtype', gebouwtype: 'Gebouwtype',
-        Gebouwsubtype: 'Gebouwsubtype', gebouwsubtype: 'Gebouwsubtype',
+        Gebouwsubtype: 'Ligging in het gebouw', gebouwsubtype: 'Ligging in het gebouw',
         BerekendeEnergieverbruik: 'Berekend energieverbruik', berekendeEnergieverbruik: 'Berekend energieverbruik',
-        EP2Waarde: 'Fossiel energiegebruik (EP2)', ep2Waarde: 'Fossiel energiegebruik (EP2)',
+        EP2Waarde: 'Energiegebruik per m² per jaar', ep2Waarde: 'Energiegebruik per m² per jaar',
         Registratiedatum: 'Registratiedatum', registratiedatum: 'Registratiedatum',
         Opnamedatum: 'Opnamedatum', opnamedatum: 'Opnamedatum',
-        Berekeningstype: 'Berekeningstype', berekeningstype: 'Berekeningstype',
+        Berekeningstype: 'Rekenmethode', berekeningstype: 'Rekenmethode',
         Status: 'Status', status: 'Status',
         IsVereenvoudigd: 'Vereenvoudigd', isVereenvoudigd: 'Vereenvoudigd',
         Geldigheid: 'Geldigheid', geldigheid: 'Geldigheid',
@@ -3110,13 +3098,13 @@
         Bagverblijfsobjectid: 'BAG verblijfsobject ID', bagVerblijfsobjectId: 'BAG verblijfsobject ID',
         PandId: 'Pand ID',
         EnergieIndex: 'Energie-index', Energie_index: 'Energie-index',
-        EnergieIndex_met_EMG_forfaitair: 'Energie-index (standaard apparaten)',
-        Primaire_fossiele_energie: 'Fossiel energiegebruik (kWh/m² per jaar)',
-        Primaire_fossiele_energie_EMG_forfaitair: 'Fossiel energiegebruik (standaard apparaten)',
-        Energiebehoefte: 'Energiebehoefte (kWh/m² per jaar)',
-        Warmtebehoefte: 'Warmtebehoefte (kWh/m² per jaar)',
+        EnergieIndex_met_EMG_forfaitair: 'Energie-index (met apparaten)',
+        Primaire_fossiele_energie: 'Energiegebruik per m² per jaar',
+        Primaire_fossiele_energie_EMG_forfaitair: 'Energiegebruik (met apparaten)',
+        Energiebehoefte: 'Energie nodig voor warmte',
+        Warmtebehoefte: 'Warmte nodig',
         Aandeel_hernieuwbare_energie: 'Aandeel duurzame energie (%)',
-        Aandeel_hernieuwbare_energie_EMG_forfaitair: 'Aandeel duurzame energie (standaard apparaten)',
+        Aandeel_hernieuwbare_energie_EMG_forfaitair: 'Duurzame energie (met apparaten)',
         Temperatuuroverschrijding: 'Kans op oververhitting',
         Gebruiksoppervlakte_thermische_zone: 'Berekende vloeroppervlakte',
         Op_basis_van_referentiegebouw: 'Overgenomen van vergelijkbare woning',
