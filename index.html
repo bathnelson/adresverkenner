@@ -1972,25 +1972,35 @@
     function energielabelKorteUitleg(label) {
       const u = ENERGIELABEL_UITLEG[label];
       if (!u) return '';
-      return u.ep2 ? `${u.tekst} Bij woningen: ${u.ep2} kWh fossiele energie per m² per jaar.` : u.tekst;
+      return u.ep2 ? `${u.tekst} Een woning met dit label gebruikt volgens de berekening ${u.ep2} kWh energie per vierkante meter vloer per jaar.` : u.tekst;
     }
 
     // Uitgebreide uitleg onder het label van het gezochte adres. Labels van vóór 2021 zijn op
     // een andere manier berekend (energie-index), dan gelden de kWh-grenzen niet.
-    function energielabelUitlegHtml(label, info) {
+    // Het voorbeeld rekent het EP2-getal om naar de hele woning en naar m³ aardgas
+    // (1 m³ aardgas ≈ 9,77 kWh), omdat "kWh per m²" voor de meeste mensen weinig zegt.
+    function energielabelUitlegHtml(label, info, woonoppervlak) {
       const u = ENERGIELABEL_UITLEG[label];
       if (!u) return '';
       const regDatum = info?.Registratiedatum || info?.registratiedatum || info?.Opnamedatum || info?.opnamedatum || '';
       const methode = String(info?.Berekeningstype || info?.berekeningstype || '');
       const oudLabel = !methode.includes('NTA') && regDatum && new Date(regDatum) < new Date('2021-01-01');
       const ep2 = info?.Primaire_fossiele_energie ?? info?.EP2Waarde ?? info?.ep2Waarde;
+      const fmt = (n) => Math.round(n).toLocaleString('nl-NL');
       let html = `${u.tekst} `;
       if (oudLabel) {
         html += 'Dit label is vóór 2021 vastgesteld met de oudere rekenmethode, en daardoor niet één op één te vergelijken met nieuwe labels.';
       } else if (u.ep2) {
-        html += `Bij woningen hoort label ${label} bij een berekend fossiel energiegebruik van ${u.ep2} kWh per m² per jaar`;
-        if (typeof ep2 === 'number') html += `; voor deze woning is dat ${ep2.toLocaleString('nl-NL', { maximumFractionDigits: 1 })} kWh`;
-        html += '.';
+        html += `Bij label ${label} gebruikt een woning volgens de berekening ${u.ep2} kWh energie per vierkante meter vloer per jaar. `;
+        html += 'Dat getal zegt hoeveel energie (verwarming, warm water, ventilatie en eventueel koeling) er per m² nodig is, omgerekend naar wat er aan fossiele brandstof voor wordt verbrand. Zelf opgewekte zonnestroom gaat er vanaf. Hoe lager, hoe zuiniger.';
+        if (typeof ep2 === 'number') {
+          html += ` Voor deze woning is het ${fmt(ep2)} kWh per m²`;
+          if (woonoppervlak > 0 && ep2 > 0) {
+            const totaal = ep2 * woonoppervlak;
+            html += `; bij ${woonoppervlak} m² komt dat neer op ongeveer ${fmt(totaal)} kWh per jaar, vergelijkbaar met de energie in zo'n ${fmt(totaal / 9.77)} m³ aardgas`;
+          }
+          html += '.';
+        }
       }
       html += ' Het label is een berekening op basis van isolatie en installaties, niet het werkelijke verbruik van de bewoners. De schaal loopt van A++++ (zuinigst) tot G (minst zuinig).';
       return `<div class="ep-label-uitleg">${html}</div>`;
@@ -3269,7 +3279,7 @@
         const details = [gt, gk].filter(Boolean);
         if (details.length) labelCel += ` <span style="font-size:0.75rem;color:#888;margin-left:0.4rem;">${details.join(' · ')}</span>`;
         labelCel += ` <button class="ep-info-btn" onclick="toggleEpInfo()" title="EP-Online details">ⓘ</button>`;
-        labelCel += energielabelUitlegHtml(currentEnergielabel, currentEnergielabelInfo);
+        labelCel += energielabelUitlegHtml(currentEnergielabel, currentEnergielabelInfo, bagProps?.oppervlakte);
         labelCel += `<div id="ep-info-popup" class="ep-info-popup" style="display:none;"></div>`;
         energieRows += kenmerkenRij('Energielabel', labelCel);
       } else if (currentEnergielabelStatus === 'not_found') {
