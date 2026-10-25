@@ -533,27 +533,58 @@
     }
 
     /* --- EP-Online info popup --- */
-    .ep-info-btn {
+    /* Twee ronde knopjes naast het label: "?" = uitleg in gewone taal, lijst-icoon = technische
+       gegevens uit EP-Online. Rand + vulling bij hover/actief maken duidelijk dat je erop kunt tikken. */
+    .ep-icon-btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 1.2rem;
-      height: 1.2rem;
-      border: none;
-      background: none;
-      color: #6BBFAE;
-      font-size: 1rem;
+      width: 1.5rem;
+      height: 1.5rem;
+      border: 1.5px solid #6BBFAE;
+      border-radius: 50%;
+      background: #fff;
+      color: #3f8f7f;
+      font-size: 0.8rem;
+      font-weight: 700;
+      font-family: inherit;
       cursor: pointer;
       vertical-align: middle;
-      margin-left: 0.3rem;
+      margin-left: 0.35rem;
       padding: 0;
       line-height: 1;
     }
 
-    .ep-info-btn:hover { color: #263640; }
+    .ep-icon-btn svg { width: 0.8rem; height: 0.8rem; }
+    .ep-icon-btn:hover, .ep-icon-btn[aria-expanded="true"] { background: #6BBFAE; color: #fff; }
+
+    .ep-label-badge { cursor: pointer; }
+
+    .ep-label-pop {
+      position: absolute;
+      z-index: 50;
+      max-width: 260px;
+      background: #263640;
+      color: #fff;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      padding: 0.5rem 0.65rem;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    .ep-label-basis {
+      margin-top: 0.3rem;
+      font-size: 0.85rem;
+      color: #444;
+    }
 
     .ep-label-uitleg {
-      margin-top: 0.3rem;
+      margin-top: 0.5rem;
+      background: #f5f8f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 0.6rem 0.75rem;
       font-size: 0.8rem;
       line-height: 1.45;
       color: #6f7071;
@@ -1992,7 +2023,9 @@
       const methode = String(info?.Berekeningstype || info?.berekeningstype || '');
       const oudLabel = !methode.includes('NTA') && regDatum && new Date(regDatum) < new Date('2021-01-01');
       const ep2 = info?.Primaire_fossiele_energie ?? info?.EP2Waarde ?? info?.ep2Waarde;
-      let html = `${tekst} ${ENERGIELABEL_SCHAAL}`;
+      // Basisuitleg staat altijd in beeld; de rest klapt open via het "?"-knopje.
+      const basis = `<div class="ep-label-basis">${tekst}</div>`;
+      let html = ENERGIELABEL_SCHAAL;
       if (!oudLabel && typeof ep2 === 'number' && ep2 > 0 && woonoppervlak > 0) {
         const m3 = Math.round(ep2 * woonoppervlak / 9.77 / 50) * 50;
         html += ` Deze woning heeft volgens de berekening per jaar ongeveer evenveel energie nodig als er in ${m3.toLocaleString('nl-NL')} m³ gas zit.`;
@@ -2001,19 +2034,55 @@
       html += ' Let op: het label telt alleen energie voor verwarming, warm water en ventilatie, gerekend met een standaardgezin.'
         + ' Koken, verlichting en apparaten (zoals koelkast, wasmachine of laadpaal) tellen niet mee.'
         + ' Het zegt dus vooral hoe goed de woning is geïsoleerd en verwarmd, niet wat je energierekening wordt.';
-      return `<div class="ep-label-uitleg">${html}</div>`;
+      return `${basis}<div id="ep-label-uitleg" class="ep-label-uitleg" style="display:none;">${html}</div>`;
     }
 
     function energielabelBadgeHtml(label) {
       if (!label) return '<span style="color:#999;font-size:0.85rem;">Geen label</span>';
       const uitleg = energielabelKorteUitleg(label);
-      const titleAttr = uitleg ? ` title="Energielabel ${label}: ${uitleg}"` : '';
-      const cursor = uitleg ? 'cursor:help;' : '';
+      const tikbaar = uitleg ? ` class="ep-label-badge" role="button" tabindex="0" data-label="${label}" aria-label="Energielabel ${label}, tik voor uitleg"` : '';
       const colors = {'A+++++':'#009036','A++++':'#009036','A+++':'#009036','A++':'#009036','A+':'#009036','A':'#009036','B':'#55ab26','C':'#c8d100','D':'#fff200','E':'#f7a600','F':'#ed7d00','G':'#e30613'};
       const textColors = {'C':'#333','D':'#333'};
       const bg = colors[label] || '#999';
       const fg = textColors[label] || '#fff';
-      return `<span${titleAttr} style="${cursor}display:inline-block;background:${bg};color:${fg};padding:0.15rem 0.5rem;border-radius:3px;font-weight:700;font-size:0.85rem;">${label}</span>`;
+      return `<span${tikbaar} style="display:inline-block;background:${bg};color:${fg};padding:0.15rem 0.5rem;border-radius:3px;font-weight:700;font-size:0.85rem;">${label}</span>`;
+    }
+
+    // Tik/klik op een labelbadge (ook in het VvE-schema) toont de korte uitleg in een
+    // klein tekstvak eronder; werkt op mobiel, waar een title-tooltip niet verschijnt.
+    function toonLabelPop(badge) {
+      const bestaand = document.querySelector('.ep-label-pop');
+      const zelfdeBadge = bestaand && bestaand._badge === badge;
+      if (bestaand) bestaand.remove();
+      if (zelfdeBadge) return;
+      const pop = document.createElement('div');
+      pop.className = 'ep-label-pop';
+      pop.textContent = `Energielabel ${badge.dataset.label}: ${energielabelKorteUitleg(badge.dataset.label)}`;
+      pop._badge = badge;
+      document.body.appendChild(pop);
+      const r = badge.getBoundingClientRect();
+      const left = Math.max(8, Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - pop.offsetWidth - 8));
+      pop.style.left = `${left}px`;
+      pop.style.top = `${r.bottom + window.scrollY + 6}px`;
+    }
+
+    document.addEventListener('click', (e) => {
+      const badge = e.target.closest('.ep-label-badge');
+      if (badge) { toonLabelPop(badge); return; }
+      document.querySelector('.ep-label-pop')?.remove();
+    });
+    document.addEventListener('keydown', (e) => {
+      const badge = e.target.closest?.('.ep-label-badge');
+      if (badge && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toonLabelPop(badge); }
+      if (e.key === 'Escape') document.querySelector('.ep-label-pop')?.remove();
+    });
+
+    function toggleLabelUitleg(btn) {
+      const el = document.getElementById('ep-label-uitleg');
+      if (!el) return;
+      const open = el.style.display === 'none';
+      el.style.display = open ? 'block' : 'none';
+      btn.setAttribute('aria-expanded', String(open));
     }
 
     // EP-Online geeft de positie van een appartement in het gebouw mee via "Gebouwsubtype",
@@ -3069,13 +3138,15 @@
       return gk;
     }
 
-    function toggleEpInfo() {
+    function toggleEpInfo(btn) {
       const popup = document.getElementById('ep-info-popup');
       if (!popup) return;
       if (popup.style.display !== 'none') {
         popup.style.display = 'none';
+        btn?.setAttribute('aria-expanded', 'false');
         return;
       }
+      btn?.setAttribute('aria-expanded', 'true');
       if (!currentEnergielabelInfo) return;
       const friendlyNames = {
         LabelLetter: 'Energielabel', labelLetter: 'Energielabel',
@@ -3341,7 +3412,8 @@
         const gk = gebouwklasseLeesbaar(currentEnergielabelInfo?.Gebouwklasse || currentEnergielabelInfo?.gebouwklasse || '');
         const details = [gt, gk].filter(Boolean);
         if (details.length) labelCel += ` <span style="font-size:0.75rem;color:#888;margin-left:0.4rem;">${details.join(' · ')}</span>`;
-        labelCel += ` <button class="ep-info-btn" onclick="toggleEpInfo()" title="Alle gegevens van het energielabel, met uitleg">ⓘ</button>`;
+        labelCel += ` <button class="ep-icon-btn" onclick="toggleLabelUitleg(this)" aria-expanded="false" title="Meer uitleg over dit label" aria-label="Meer uitleg over dit label">?</button>`;
+        labelCel += `<button class="ep-icon-btn" onclick="toggleEpInfo(this)" aria-expanded="false" title="Technische gegevens van het label (EP-Online)" aria-label="Technische gegevens van het label"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5h12M2 8h12M2 12.5h12"/></svg></button>`;
         labelCel += energielabelUitlegHtml(currentEnergielabel, currentEnergielabelInfo, bagProps?.oppervlakte);
         labelCel += `<div id="ep-info-popup" class="ep-info-popup" style="display:none;"></div>`;
         energieRows += kenmerkenRij('Energielabel', labelCel);
