@@ -586,6 +586,9 @@
     }
     .ep-gas-tabel .ep-gas-nu td, .compact-table .ep-gas-tabel .ep-gas-nu td:first-child, .compact-table .ep-gas-tabel .ep-gas-nu td:last-child { font-weight: 700; color: #263640; }
 
+    .ep-bronnen { font-size: 0.72rem; color: #888; }
+    .ep-bronnen a { color: #4361ee; }
+
     .ep-label-basis {
       margin-top: 0.3rem;
       font-size: 0.85rem;
@@ -2040,10 +2043,51 @@
       return /^A\+/.test(label) ? 'A+' : label;
     }
 
-    function gasIndicatie(label, woonoppervlak) {
+    // Correctie per woningtype: gemiddeld gasverbruik per m² van woningen met cv of blokverwarming,
+    // per type gedeeld door het gemiddelde van alle woningen (9,6 m³/m²). CBS StatLine 85140NED,
+    // 2024: appartement 10,7 · tussenwoning 8,7 · hoekwoning 9,7 · 2-onder-1-kap 9,5 · vrijstaand 9,1.
+    // Appartementen zitten per m² hoger omdat ze kleiner zijn (warm water telt per huishouden).
+    const WONINGTYPES = {
+      appartement: { factor: 10.7 / 9.6, naam: 'appartementen' },
+      tussenwoning: { factor: 8.7 / 9.6, naam: 'tussenwoningen' },
+      hoekwoning: { factor: 9.7 / 9.6, naam: 'hoekwoningen' },
+      twee_onder_een_kap: { factor: 9.5 / 9.6, naam: '2-onder-1-kapwoningen' },
+      vrijstaand: { factor: 9.1 / 9.6, naam: 'vrijstaande woningen' },
+    };
+
+    function woningtypeUitEp(info) {
+      const t = String(info?.Gebouwtype || info?.gebouwtype || '').toLowerCase();
+      if (!t) return null;
+      if (/appartement|flat|maisonnette|portiek|galerij/.test(t)) return WONINGTYPES.appartement;
+      if (/vrijstaand/.test(t)) return WONINGTYPES.vrijstaand;
+      if (/onder|kap/.test(t)) return WONINGTYPES.twee_onder_een_kap;
+      if (/hoek/.test(t)) return WONINGTYPES.hoekwoning;
+      if (/tussen|rij/.test(t)) return WONINGTYPES.tussenwoning;
+      return null;
+    }
+
+    // Korte uitleg over de ligging van een appartement. De ligging verandert het warmteverlies
+    // (extra buitenmuur, dak of vloer boven de kelder/buitenlucht), maar zit al in de labelberekening
+    // verwerkt; daarom geen extra correctie op het gasverbruik, alleen uitleg.
+    function liggingUitleg(info) {
+      const lig = liggingInfo(info?.Gebouwsubtype || info?.gebouwsubtype || '');
+      if (!lig.raw || (!lig.horiz && !lig.vertRank)) return '';
+      const delen = [];
+      if (lig.vertRank === 3) delen.push('onder het dak');
+      else if (lig.vertRank === 2) delen.push('tussen andere woningen in (boven en onder buren)');
+      else if (lig.vertRank === 1) delen.push('op de begane grond');
+      if (lig.horiz === 'hoek') delen.push('op een hoek');
+      else if (lig.horiz === 'tussen') delen.push('met buren aan beide kanten');
+      const verlies = lig.vertRank === 2 && lig.horiz !== 'hoek'
+        ? 'Er grenst weinig buitenmuur aan de woning, dus die verliest relatief weinig warmte.'
+        : `Via ${[lig.vertRank === 3 ? 'het dak' : '', lig.vertRank === 1 ? 'de vloer' : '', lig.horiz === 'hoek' ? 'de extra buitenmuur' : ''].filter(Boolean).join(' en ') || 'de buitenmuren'} gaat meer warmte verloren dan bij een appartement dat er middenin ligt.`;
+      return `Deze woning ligt ${delen.join(' en ')}. ${verlies} Dat is al verwerkt in de labelletter.`;
+    }
+
+    function gasIndicatie(label, woonoppervlak, factor = 1) {
       const perM2 = GAS_M3_PER_M2[gasLabelKlasse(label)];
       if (!perM2 || !(woonoppervlak > 0)) return null;
-      const m3 = perM2 * woonoppervlak;
+      const m3 = perM2 * factor * woonoppervlak;
       return { m3, euro: m3 * GASPRIJS_PER_M3 };
     }
 
@@ -2060,18 +2104,21 @@
       const methode = String(info?.Berekeningstype || info?.berekeningstype || '');
       const oudLabel = !methode.includes('NTA') && regDatum && new Date(regDatum) < new Date('2021-01-01');
       const klasse = gasLabelKlasse(label);
-      const nu = gasIndicatie(label, woonoppervlak);
+      const type = woningtypeUitEp(info);
+      const factor = type?.factor || 1;
+      const nu = gasIndicatie(label, woonoppervlak, factor);
+      const lig = liggingUitleg(info);
 
       let basis = `<div class="ep-label-basis">${tekst}</div>`;
       if (nu) {
-        basis += `<div class="ep-label-basis">Woningen zoals deze (${label}, ${woonoppervlak} m²) stoken gemiddeld zo'n `
+        basis += `<div class="ep-label-basis">${type ? type.naam.charAt(0).toUpperCase() + type.naam.slice(1) : 'Woningen'} met label ${label} van ${woonoppervlak} m² stoken gemiddeld zo'n `
           + `<strong>${fmtGetal(rond(nu.m3 * 0.8, 50))} tot ${fmtGetal(rond(nu.m3 * 1.2, 50))} m³ gas per jaar</strong>, `
           + `ongeveer <strong>€&nbsp;${fmtGetal(rond(nu.euro, 50))} per jaar</strong>.</div>`;
         // Bij E, F en G scheelt één stap in de praktijk weinig; dan tonen we de sprong naar C.
         const i = GAS_LABELS.indexOf(klasse);
         const doel = ['E', 'F', 'G'].includes(klasse) ? 'C' : (i >= 0 && i < GAS_LABELS.length - 2 ? GAS_LABELS[i + 1] : null);
         if (doel) {
-          const scheelt = nu.m3 - gasIndicatie(doel, woonoppervlak).m3;
+          const scheelt = nu.m3 - gasIndicatie(doel, woonoppervlak, factor).m3;
           const wat = doel === 'C' ? `Naar label C` : `Eén label beter (${doel})`;
           basis += `<div class="ep-label-basis">${wat} scheelt ongeveer ${fmtGetal(rond(scheelt, 10))} m³ gas, zo'n <strong>€&nbsp;${fmtGetal(rond(scheelt * GASPRIJS_PER_M3, 10))} per jaar</strong>.</div>`;
         }
@@ -2081,18 +2128,30 @@
       if (nu) {
         html += '<table class="ep-gas-tabel"><thead><tr><th>Label</th><th>Gas/jaar</th><th>Kosten/jaar</th></tr></thead><tbody>';
         for (const l of GAS_LABELS.slice().reverse()) {
-          const g = gasIndicatie(l, woonoppervlak);
+          const g = gasIndicatie(l, woonoppervlak, factor);
           const verschil = rond(g.euro - nu.euro, 10);
           const verschilTxt = l === klasse || verschil === 0 ? '' : ` <span class="ep-gas-verschil">(${verschil < 0 ? '−' : '+'}€&nbsp;${fmtGetal(Math.abs(verschil))})</span>`;
           html += `<tr${l === klasse ? ' class="ep-gas-nu"' : ''}><td>${l === 'A+' ? 'A+ of hoger' : l}${l === klasse ? ' (nu)' : ''}</td><td>${fmtGetal(rond(g.m3, 10))} m³</td><td>€&nbsp;${fmtGetal(rond(g.euro, 10))}${verschilTxt}</td></tr>`;
         }
         html += '</tbody></table>';
-        html += `<p>Dit is een indicatie op basis van wat vergelijkbare woningen in Nederland gemiddeld echt aan gas verbruiken, met een gasprijs van €&nbsp;${GASPRIJS_PER_M3.toLocaleString('nl-NL', { minimumFractionDigits: 2 })} per m³. Vaste kosten zoals vastrecht en netbeheer tellen niet mee, die blijven gelijk.</p>`;
-        html += '<p>Jouw eigen verbruik kan flink anders zijn: het hangt af van hoeveel mensen er wonen, hoe warm je het wilt hebben en of je een appartement onder het dak of tussen de buren hebt. Gebruikt de woning geen gas (warmtepomp of stadsverwarming), dan gelden deze bedragen niet.</p>';
+        if (lig) html += `<p>${lig}</p>`;
+        html += `<p>Dit is een indicatie op basis van wat vergelijkbare woningen in Nederland gemiddeld echt aan gas verbruiken${type ? `, gecorrigeerd voor het type woning (${type.naam})` : ''}, met een gasprijs van €&nbsp;${GASPRIJS_PER_M3.toLocaleString('nl-NL', { minimumFractionDigits: 2 })} per m³. Vaste kosten zoals vastrecht en netbeheer tellen niet mee, die blijven gelijk.</p>`;
+        html += '<p>Jouw eigen verbruik kan flink anders zijn: het hangt vooral af van hoeveel mensen er wonen en hoe warm je het wilt hebben. Gebruikt de woning geen gas (warmtepomp of stadsverwarming), dan gelden deze bedragen niet.</p>';
         html += '<p>Een betere labelletter levert in de praktijk minder op dan het label belooft. Tussen E, F en G zit weinig verschil; de grootste winst zit in de stap naar C, B en A. De kosten van de verbouwing (isolatie, nieuwe ramen) zitten niet in deze bedragen.</p>';
       }
       if (oudLabel) html += '<p>Dit label is van vóór 2021 en op een oudere manier berekend.</p>';
       html += `<p>${ENERGIELABEL_SCHAAL} Het label telt alleen verwarming, warm water en ventilatie, niet koken, verlichting of apparaten.</p>`;
+      if (nu) {
+        html += '<p class="ep-bronnen">Bronnen: '
+          + '<a href="https://www.cbs.nl/nl-nl/cijfers/detail/85140NED" target="_blank" rel="noopener">CBS, gasverbruik per woningtype 2024</a>; '
+          + '<a href="https://www.cbs.nl/nl-nl/longread/aanvullende-statistische-diensten/2023/aantallen-en-kenmerken-van-verenigingen-van-eigenaren-2022/4-kenmerken-energie" target="_blank" rel="noopener">CBS, gasverbruik VvE-woningen per label 2022</a>; '
+          + '<a href="https://www.rekenkamer.amsterdam.nl/content/uploads/2014/11/OTB-TU-Delft-Relatie-tussen-huishoudenskenmerken-en-gedrag-energielabel-en-werkelijk-energiegebruik.pdf" target="_blank" rel="noopener">TU Delft, label en werkelijk verbruik</a>; '
+          + '<a href="https://www.rabobank.nl/kennis/d011347940-energielabel-zegt-niet-alles-over-energieverbruik" target="_blank" rel="noopener">RaboResearch, label en gasverbruik</a>; '
+          + '<a href="https://www.cbs.nl/nl-nl/cijfers/detail/85592NED" target="_blank" rel="noopener">CBS, gasprijs september 2026</a>. '
+          + 'Het verbruik per label is een eigen schatting op basis van deze bronnen.</p>';
+      } else if (lig) {
+        html += `<p>${lig}</p>`;
+      }
       return `${basis}<div id="ep-label-uitleg" class="ep-label-uitleg" style="display:none;">${html}</div>`;
     }
 
