@@ -1988,9 +1988,7 @@
     async function fetchEnergieInfoForBagid(bagid) {
       if (!bagid) return { label: null, gebouwsubtype: null, gebouwtype: null };
       try {
-        const res = await fetch(`${EP_PROXY_URL}?bagid=${encodeURIComponent(bagid)}`);
-        if (!res.ok) return { label: null, gebouwsubtype: null, gebouwtype: null };
-        const data = await res.json();
+        const data = await epProxyJson(bagid);
         if (data._httpStatus && data._httpStatus >= 400) return { label: null, gebouwsubtype: null, gebouwtype: null };
         const rec = data['0'] || data;
         return {
@@ -3088,6 +3086,66 @@
     const EP_PROXY_URL = 'https://adresverkenner.nl/helpers/ep-proxy.php';
     let currentEnergielabelClip = '';
 
+    // Alle EP-proxy-verzoeken lopen via epProxyJson: de proxy draait op gedeelde hosting en
+    // geeft bij te veel gelijktijdige verzoeken 508 (resource limit) of 429 terug - zonder
+    // CORS-header, dus in de browser zichtbaar als CORS-fout. Een appartementencomplex leverde
+    // tientallen tegelijk op. Daarom: maximaal EP_MAX_GELIJKTIJDIG tegelijk, elk bagid maar
+    // één keer opvragen (ook gedeeld tussen "Uw woning" en "Adressen in dit pand"), en bij
+    // 429/508/503 of een netwerkfout een paar keer opnieuw proberen met oplopende wachttijd.
+    const EP_MAX_GELIJKTIJDIG = 3;
+    const EP_HERHAAL_WACHTTIJDEN = [1000, 2500, 5000];
+    const epCache = new Map(); // bagid -> Promise<json>
+    const epWachtrij = [];
+    let epActief = 0;
+
+    function epVolgende() {
+      while (epActief < EP_MAX_GELIJKTIJDIG && epWachtrij.length) {
+        const taak = epWachtrij.shift();
+        epActief++;
+        taak().finally(() => { epActief--; epVolgende(); });
+      }
+    }
+
+    function epInWachtrij(fn, voorrang) {
+      return new Promise((resolve, reject) => {
+        const taak = () => fn().then(resolve, reject);
+        if (voorrang) epWachtrij.unshift(taak); else epWachtrij.push(taak);
+        epVolgende();
+      });
+    }
+
+    async function epFetchMetHerhaling(bagid) {
+      const url = `${EP_PROXY_URL}?bagid=${encodeURIComponent(bagid)}`;
+      for (let poging = 0; ; poging++) {
+        let res = null;
+        try {
+          res = await fetch(url);
+        } catch (err) {
+          // Een 508/429 zonder CORS-header komt hier binnen als TypeError (netwerkfout).
+          if (poging >= EP_HERHAAL_WACHTTIJDEN.length) throw err;
+        }
+        if (res) {
+          if (res.ok) return res.json();
+          if (![429, 503, 508].includes(res.status) || poging >= EP_HERHAAL_WACHTTIJDEN.length) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+        }
+        await new Promise(r => setTimeout(r, EP_HERHAAL_WACHTTIJDEN[poging]));
+      }
+    }
+
+    // voorrang: true voor het label van het gezochte adres, zodat dat niet achter een lange
+    // rij buuradressen hoeft te wachten.
+    function epProxyJson(bagid, { voorrang = false } = {}) {
+      if (!epCache.has(bagid)) {
+        const p = epInWachtrij(() => epFetchMetHerhaling(bagid), voorrang);
+        // Mislukte verzoeken niet onthouden, zodat een volgende zoekopdracht het opnieuw probeert.
+        p.catch(() => epCache.delete(bagid));
+        epCache.set(bagid, p);
+      }
+      return epCache.get(bagid);
+    }
+
     async function fetchEnergielabel(adres) {
       const postcode = (adres.postcode || '').replace(/\s/g, '');
       const huisnummer = adres.huisnummer || '';
@@ -3100,13 +3158,7 @@
       if (!bagid) { console.log('[EP] Geen bagid, skip'); return; }
 
       try {
-        const fetchUrl = `${EP_PROXY_URL}?bagid=${encodeURIComponent(bagid)}`;
-        console.log('[EP] Fetch:', fetchUrl);
-        const res = await fetch(fetchUrl);
-        console.log('[EP] Status:', res.status);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const data = await res.json();
+        const data = await epProxyJson(bagid, { voorrang: true });
         console.log('[EP] Data keys:', Object.keys(data), '_httpStatus:', data._httpStatus);
 
         if (data._httpStatus === 404) {
