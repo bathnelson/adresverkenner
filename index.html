@@ -1478,13 +1478,34 @@
     // --- Dakoppervlak ophalen (3D BAG) ---
     // Haalt ruwe 3D BAG-attributen + berekende vlakken op voor één pand-ID, zonder te renderen
     // (gedeeld door fetchDakData en de VvE-aggregatie hieronder).
+    // Een fout met .onbereikbaar = true betekent dat 3D BAG (of de proxy) zelf niet antwoordt,
+    // i.p.v. dat er voor dit pand geen model is - zo kan de melding onderscheid maken.
+    const DAK_TIMEOUT_MS = 20000;
+    function dakOnbereikbaarFout(msg) {
+      const err = new Error(msg);
+      err.onbereikbaar = true;
+      return err;
+    }
+
     async function fetchDakAttrsEnVlakken(pandIdentificatie) {
       const url = `${THREEDBAG_PROXY_URL}?pandid=${encodeURIComponent(pandIdentificatie)}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      let res;
+      try {
+        // Bij een storing bij 3D BAG blijft het verzoek anders minutenlang hangen.
+        res = await fetch(url, { signal: AbortSignal.timeout?.(DAK_TIMEOUT_MS) });
+      } catch (err) {
+        throw dakOnbereikbaarFout(`3D BAG niet bereikbaar: ${err.message}`);
+      }
+      if (!res.ok) {
+        if (res.status >= 500 || res.status === 429) throw dakOnbereikbaarFout(`HTTP ${res.status}`);
+        throw new Error(`HTTP ${res.status}`);
+      }
 
       const data = await res.json();
-      if (data._httpStatus && data._httpStatus >= 400) throw new Error(`3D BAG HTTP ${data._httpStatus}`);
+      if (data._httpStatus && data._httpStatus >= 400) {
+        if (data._httpStatus >= 500 || data._httpStatus === 429) throw dakOnbereikbaarFout(`3D BAG HTTP ${data._httpStatus}`);
+        throw new Error(`3D BAG HTTP ${data._httpStatus}`);
+      }
 
       const attrs = data.feature?.CityObjects?.[data._objectId]?.attributes;
       if (!attrs) throw new Error('Geen 3D BAG-attributen gevonden');
@@ -1492,8 +1513,25 @@
       return { attrs, faces: computeBuildingFaces(data) };
     }
 
+    // Melding als het dakoppervlak niet geladen kon worden. Bij een storing een duidelijke uitleg
+    // met een knop om het opnieuw te proberen; alleen als 3D BAG wel antwoordt maar het pand niet
+    // kent, de korte melding dat er (nog) geen model is.
+    let herprobeerDak = null;
+    function dakFoutHtml(onbereikbaar, meerderePanden) {
+      if (!onbereikbaar) {
+        return `<p style="color:#888;font-size:0.85rem;">Dakoppervlak niet beschikbaar (nog geen 3D BAG-model voor ${meerderePanden ? 'deze panden' : 'dit pand'}).</p>`;
+      }
+      return `<div style="font-size:0.85rem;color:#6b4e00;background:#fff8e1;border:1px solid #f3dfa2;border-radius:6px;padding:0.75rem 0.85rem;">`
+        + `<strong>Het dakoppervlak kan nu even niet worden opgehaald.</strong><br>`
+        + `De gegevens komen uit 3D BAG van de TU Delft, en die dienst is op dit moment niet bereikbaar. `
+        + `Dat ligt niet aan dit adres. Probeer het later nog eens.`
+        + `<br><button type="button" class="cta-btn" onclick="herprobeerDak && herprobeerDak()" style="margin-top:0.65rem;">Opnieuw proberen</button>`
+        + `</div>`;
+    }
+
     async function fetchDakData(pandIdentificatie, aantalVerblijfsobjecten) {
       if (!pandIdentificatie) return;
+      herprobeerDak = () => fetchDakData(pandIdentificatie, aantalVerblijfsobjecten);
 
       const card = document.getElementById('dak-card');
       const container = document.getElementById('dak-data');
@@ -1513,7 +1551,7 @@
         fetchDakVergelijking2D([pandIdentificatie]);
       } catch (err) {
         console.warn('3D BAG dakoppervlak ophalen mislukt:', err);
-        container.innerHTML = '<p style="color:#888;font-size:0.85rem;">Dakoppervlak niet beschikbaar (nog geen 3D BAG-model voor dit pand).</p>';
+        container.innerHTML = dakFoutHtml(err.onbereikbaar, false);
       }
     }
 
@@ -1633,6 +1671,7 @@
     // verschillende panden kunnen zonder herpositioneren worden samengevoegd - de 3D-viewer
     // centreert vanzelf om de gezamenlijke bounding box van alle panden tezamen.
     async function fetchDakDataVoorPanden(pandIdsInvoer) {
+      herprobeerDak = () => fetchDakDataVoorPanden(pandIdsInvoer);
       const card = document.getElementById('dak-card');
       const container = document.getElementById('dak-data');
       card.style.display = 'block';
@@ -1647,11 +1686,18 @@
           container.innerHTML = `<span class="data-loading"><span class="spinner-sm"></span> Dakoppervlak van ${uniekePandIds.length} panden (VvE-cluster) ophalen...</span>`;
         }
 
+        let onbereikbaar = false;
         const resultaten = await Promise.all(uniekePandIds.map(pid =>
-          fetchDakAttrsEnVlakken(pid).catch(err => { console.warn(`Pand ${pid} overgeslagen:`, err); return null; })
+          fetchDakAttrsEnVlakken(pid).catch(err => {
+            console.warn(`Pand ${pid} overgeslagen:`, err);
+            if (err.onbereikbaar) onbereikbaar = true;
+            return null;
+          })
         ));
         const geldig = resultaten.filter(Boolean);
-        if (!geldig.length) throw new Error('Geen 3D BAG-data gevonden voor deze panden');
+        if (!geldig.length) {
+          throw onbereikbaar ? dakOnbereikbaarFout('3D BAG niet bereikbaar') : new Error('Geen 3D BAG-data gevonden voor deze panden');
+        }
 
         currentBuildingFaces = geldig.flatMap(r => r.faces);
         currentDakDelen = currentBuildingFaces.filter(v => v.type === 'RoofSurface').sort((a, b) => b.oppervlak - a.oppervlak);
@@ -1660,7 +1706,7 @@
         fetchDakVergelijking2D(uniekePandIds);
       } catch (err) {
         console.warn('3D BAG-data voor panden ophalen mislukt:', err);
-        container.innerHTML = '<p style="color:#888;font-size:0.85rem;">Dakoppervlak niet beschikbaar voor deze panden.</p>';
+        container.innerHTML = dakFoutHtml(err.onbereikbaar, true);
       }
     }
 
